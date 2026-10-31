@@ -1,10 +1,60 @@
-# 只保留 Ultralytics 源码目录，其他内容全部忽略
-/*
-!/.gitignore
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
-# 放行父目录，但忽略其中的其他内容
-!/ultralytics-8.3.163/
-/ultralytics-8.3.163/*
+# Node / frontend
+node_modules/
+dist/
+.vite/
+.next/
 
-# 只放行目标源码目录
-!/ultralytics-8.3.163/ultralytics-8.3.163/
+# Data, weights, training outputs
+datasets/*
+!datasets/README.md
+weights/*
+!weights/README.md
+runs/
+*.pt
+*.onnx
+*.engine
+
+# Runtime data / local databases
+data/
+logs/
+snapshots/
+uploads/
+*.db
+*.sqlite
+*.sqlite3
+
+# Large local archives / raw videos
+*.zip
+*.mp4
+*.avi
+*.mov
+资料/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Logs, Office lock files and temporary render directories
+*.log
+~$*
+.tmp/
+.dsh-office-*/
