@@ -308,7 +308,7 @@ def parse_args(argv=None):
     )
     parser.add_argument("--src", type=Path, default=SRC_DEFAULT, help="源 YOLO 数据集根目录")
     parser.add_argument("--dst", type=Path, default=DST_DEFAULT, help="小数据集输出根目录")
-    parser.add_argument("--num", type=int, default=100, help="一共抽多少张图片")
+    parser.add_argument("--num", type=int, default=50, help="一共抽多少张图片")
     parser.add_argument("--train-ratio", type=float, default=0.7, help="train 占比")
     parser.add_argument("--seed", type=int, default=42, help="随机种子，固定后抽样可复现")
     parser.add_argument("--source-split", choices=("train", "valid", "test", "all"),
