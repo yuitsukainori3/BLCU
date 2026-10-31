@@ -171,9 +171,9 @@ python -c "from ultralytics import YOLO; print(YOLO('yolo11n.pt'))"
 
 | ID | 名称 | 标注对象 | 不要标 |
 |---:|---|---|---|
-| 0 | `person` | 画面中可见的施工人员 | 衣服、人偶、照片里的人 |
+| 0 | `head` | **未戴安全帽的裸头** | 戴了安全帽的头、严重遮挡看不清的头 |
 | 1 | `helmet` | 戴在头上的安全帽 | 拿在手里、放在地上、挂在墙上的安全帽 |
-| 2 | `head` | **未戴安全帽的裸头** | 戴了安全帽的头、严重遮挡看不清的头 |
+| 2 | `person` | 画面中可见的施工人员 | 衣服、人偶、照片里的人 |
 
 关键点：`head` 是“裸头”，不是“所有头”。如果所有头都标成 `head`，模型还是分不出戴没戴。
 
@@ -181,8 +181,8 @@ python -c "from ultralytics import YOLO; print(YOLO('yolo11n.pt'))"
 
 ```yaml
 names:
-  0: helmet
-  1: head
+  0: head
+  1: helmet
 ```
 
 但没有 `person` 时，后处理只能按“头”做统计，无法稳定地把头盔关联到具体人员。比赛项目建议三类。
@@ -222,8 +222,8 @@ class_id x_center y_center width height
 坐标都是 0—1 的归一化值。例如：
 
 ```text
-1 0.512 0.433 0.120 0.180
-2 0.480 0.410 0.090 0.120
+0 0.512 0.433 0.120 0.180
+1 0.480 0.410 0.090 0.120
 ```
 
 ### 3.3 data.yaml
@@ -237,16 +237,17 @@ val: images/val
 test: images/test
 
 names:
-  0: person
+  0: head
   1: helmet
-  2: head
+  2: person
 ```
 
 注意：
 
 - 路径用 `/` 或双反斜杠，不要用单个 `\`。
 - `path` 建议写绝对路径，最不容易出错。
-- `names` 的顺序必须和标签里的 class_id 一致。
+- `names` 的顺序必须和标签里的 class_id 一致：本项目的固定顺序是 `0 head`、`1 helmet`、`2 person`（见[标签规则](标签规则.md)）。
+- `names` 在训练时会被写进权重文件，**改 `data.yaml` 不会自动改旧的 `best.pt`**。换了类序要重训一次，或者在推理前手动设 `model.names = {0: 'head', 1: 'helmet', 2: 'person'}`，否则画出来的标签还是错的。
 - 不要把 `nc` 和 `names` 写冲突；Ultralytics 会从 `names` 推断类别数。
 
 ### 3.4 当前 head 数据怎么处理

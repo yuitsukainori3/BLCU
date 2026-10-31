@@ -81,7 +81,7 @@ ultralytics-8.3.163/ultralytics-8.3.163/Train.py
 ## 文档
 
 - [项目设计文档](docs/安全帽智检_项目文档_V0.1.docx)
-- [标签规则](docs/标签规则.md)（person / helmet / head 标注规范）
+- [标签规则](docs/标签规则.md)（head / helmet / person 标注规范，v1.1）
 - [YOLO11 安全帽模型训练指南](docs/YOLO11安全帽模型训练指南.md)
 - [通用版训练指南](docs/YOLO11安全帽模型训练指南_通用版.md)
 - [获奖作品选题分析](docs/人工智能应用方向获奖分析与选题建议.md)

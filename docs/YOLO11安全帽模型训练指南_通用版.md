@@ -56,17 +56,17 @@ names: ['head']
 
 ```yaml
 names:
-  0: helmet
-  1: head
+  0: head
+  1: helmet
 ```
 
 更推荐三类：
 
 ```yaml
 names:
-  0: person
+  0: head
   1: helmet
-  2: head
+  2: person
 ```
 
 其中 `head` 指**未戴安全帽的裸头**，不是“所有头”。
@@ -170,9 +170,9 @@ yolo checks
 
 | ID | 名称 | 标注对象 | 不要标 |
 |---:|---|---|---|
-| 0 | `person` | 画面中可见的施工人员 | 衣服、人偶、照片里的人 |
+| 0 | `head` | **未戴安全帽的裸头** | 戴了安全帽的头、严重遮挡看不清的头 |
 | 1 | `helmet` | 戴在头上的安全帽 | 拿在手里、放在地上、挂在墙上的安全帽 |
-| 2 | `head` | **未戴安全帽的裸头** | 戴了安全帽的头、严重遮挡看不清的头 |
+| 2 | `person` | 画面中可见的施工人员 | 衣服、人偶、照片里的人 |
 
 关键：`head` 是裸头，不是所有头。所有头都标 `head`，模型仍然分不出戴没戴。
 
@@ -180,8 +180,8 @@ yolo checks
 
 ```yaml
 names:
-  0: helmet
-  1: head
+  0: head
+  1: helmet
 ```
 
 但没有 `person` 时，后处理只能按“头”统计，无法稳定地把头盔关联到具体人员。比赛项目建议三类。
@@ -221,8 +221,8 @@ class_id x_center y_center width height
 坐标是 0—1 的归一化值。例如：
 
 ```text
-1 0.512 0.433 0.120 0.180
-2 0.480 0.410 0.090 0.120
+0 0.512 0.433 0.120 0.180
+1 0.480 0.410 0.090 0.120
 ```
 
 ### 3.4 data.yaml
@@ -234,16 +234,16 @@ val: images/val
 test: images/test
 
 names:
-  0: person
+  0: head
   1: helmet
-  2: head
+  2: person
 ```
 
 注意：
 
 - 路径用 `/`，不要用单个 `\`。
 - `path` 写绝对路径，或确保相对路径从正确目录解析。
-- `names` 顺序必须和标签 class_id 一致。
+- `names` 顺序必须和标签 class_id 一致：本项目固定 `0 head`、`1 helmet`、`2 person`。
 - 路径有空格时用引号包起来。
 
 ### 3.5 数据检查脚本
