@@ -1,5 +1,10 @@
-.tools/
-.tmp/
-.work/
-*.log
-~$*.xlsx
+# 只保留 Ultralytics 源码目录，其他内容全部忽略
+/*
+!/.gitignore
+
+# 放行父目录，但忽略其中的其他内容
+!/ultralytics-8.3.163/
+/ultralytics-8.3.163/*
+
+# 只放行目标源码目录
+!/ultralytics-8.3.163/ultralytics-8.3.163/
