@@ -1,0 +1,7 @@
+# 由 make_small_dataset.py 生成，供 ultralytics 直接训练/验证
+path: F:/Competition/0make_dataset/small_dataset
+train: images/train
+val: images/val
+
+nc: 1
+names: ['head']

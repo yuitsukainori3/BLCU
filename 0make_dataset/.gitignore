@@ -1,0 +1,4 @@
+# 从数据集里搬出来的图片/标签体积大，不进版本库；
+# 需要时用 make_small_dataset.py 重新抽（种子固定，可复现）。
+small_dataset/images/
+small_dataset/labels/
