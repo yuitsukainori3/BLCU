@@ -84,6 +84,7 @@ ultralytics-8.3.163/ultralytics-8.3.163/Train.py
 - [标签规则](docs/标签规则.md)（head / helmet 两类标注规范，v1.2）
 - [YOLO11 安全帽模型训练指南](docs/YOLO11安全帽模型训练指南.md)
 - [通用版训练指南](docs/YOLO11安全帽模型训练指南_通用版.md)
+- [两路检测方案](docs/两路检测方案.md)（COCO 人体 + 自训头部）
 - [获奖作品选题分析](docs/人工智能应用方向获奖分析与选题建议.md)
 - [筛选说明](docs/筛选说明.md)
 
