@@ -9,7 +9,7 @@
 训练一个“自己的 YOLO11 安全帽模型”，最短路径是：
 
 ```text
-准备 helmet/head/person 数据
+准备 helmet/head 两类数据
   → 安装 Python + PyTorch + Ultralytics
   → 写 data.yaml
   → 检查图片、标签、类别
@@ -60,18 +60,9 @@ names:
   1: helmet
 ```
 
-更推荐三类：
-
-```yaml
-names:
-  0: head
-  1: helmet
-  2: person
-```
-
 其中 `head` 指**未戴安全帽的裸头**，不是“所有头”。
 
-如果队友手里有 `helmet/head/person` 的数据，直接用那份；如果只有当前 `head` 数据，先用来练手，同时找/补一份合规数据。
+如果队友手里有 `helmet/head` 的数据，直接用那份；如果只有当前 `head` 数据，先用来练手，同时找/补一份合规数据。
 
 ---
 
@@ -166,17 +157,14 @@ yolo checks
 
 ### 3.1 类别定义
 
-推荐三类：
+推荐两类（本项目的做法）：
 
 | ID | 名称 | 标注对象 | 不要标 |
 |---:|---|---|---|
 | 0 | `head` | **未戴安全帽的裸头** | 戴了安全帽的头、严重遮挡看不清的头 |
 | 1 | `helmet` | 戴在头上的安全帽 | 拿在手里、放在地上、挂在墙上的安全帽 |
-| 2 | `person` | 画面中可见的施工人员 | 衣服、人偶、照片里的人 |
 
 关键：`head` 是裸头，不是所有头。所有头都标 `head`，模型仍然分不出戴没戴。
-
-如果只做两类，可以：
 
 ```yaml
 names:
@@ -184,7 +172,7 @@ names:
   1: helmet
 ```
 
-但没有 `person` 时，后处理只能按“头”统计，无法稳定地把头盔关联到具体人员。比赛项目建议三类。
+需要“人”框时不在标签里加 `person`：用 COCO 预训练的 YOLO11 单独跑一路，两路结果在业务层合并即可。
 
 ### 3.2 目录结构
 
@@ -236,14 +224,13 @@ test: images/test
 names:
   0: head
   1: helmet
-  2: person
 ```
 
 注意：
 
 - 路径用 `/`，不要用单个 `\`。
 - `path` 写绝对路径，或确保相对路径从正确目录解析。
-- `names` 顺序必须和标签 class_id 一致：本项目固定 `0 head`、`1 helmet`、`2 person`。
+- `names` 顺序必须和标签 class_id 一致：本项目固定 `0 head`、`1 helmet`。
 - 路径有空格时用引号包起来。
 
 ### 3.5 数据检查脚本
@@ -474,12 +461,12 @@ for result in results:
 检测模型只输出框和类别；“是否违规”要在业务层做：
 
 ```text
-person 框
-  → 取头部区域
-  → 匹配 helmet / head
+helmet / head 框（两类模型）
   → 连续帧投票
   → 告警/忽略
 ```
+
+需要“人在哪”时，用 COCO 预训练权重单独跑一路 person，再按位置把头部框挂到人身上；两路模型分开训练。
 
 ---
 
@@ -588,7 +575,7 @@ python train.py
 | 天数 | 任务 | 产出 |
 |---|---|---|
 | 第 1 天 | 建 venv、装 PyTorch/Ultralytics、确认设备 | `torch.cuda.is_available()` 或 MPS 为 True |
-| 第 2 天 | 确认类别，准备 helmet/head/person 数据 | 数据目录 + `data.yaml` |
+| 第 2 天 | 确认类别，准备 helmet/head 两类数据 | 数据目录 + `data.yaml` |
 | 第 3 天 | 跑数据检查，训练 YOLO11 基线 | `best.pt`、`results.csv` |
 | 第 4 天 | 看验证集、混淆矩阵、错误样本 | 问题清单 |
 | 第 5 天 | 补难例/修标签，重训一版 | 第二版模型 |
@@ -604,7 +591,7 @@ python train.py
 - [ ] Python 3.10—3.12，虚拟环境可用。
 - [ ] PyTorch 安装正确，GPU/MPS 可用。
 - [ ] `ultralytics` 安装成功，`yolo checks` 通过。
-- [ ] 数据类别不是只有 `head`，而是 `helmet` + `head`（最好加 `person`）。
+- [ ] 数据类别不是只有 `head`，而是 `helmet` + `head` 两类。
 - [ ] `data.yaml` 的 `path`、`train`、`val`、`test` 都能找到文件。
 - [ ] 每张图片都有同名标签，class_id 在范围内。
 - [ ] 训练完成，保存了 `best.pt` 和 `last.pt`。

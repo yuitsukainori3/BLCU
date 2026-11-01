@@ -32,19 +32,19 @@ names: ['head']
 
 - 直接训练这份数据，得到的是 **head 检测器**，不是安全帽合规模型。
 - **不要**把 `head` 简单改名成 `helmet`。这样模型会把所有头都当成安全帽，裸头也会被判为合规。
-- 想完成“安全帽佩戴检测”，需要一份至少包含 `helmet` 和 `head`（裸头）两类，最好再加 `person` 的数据。
+- 想完成“安全帽佩戴检测”，需要一份至少包含 `helmet` 和 `head`（裸头）两类数据。
 
 三条路线：
 
 | 路线 | 做法 | 适合情况 |
 |---|---|---|
-| A. 换数据集（推荐） | 找 `helmet / head / person` 三类的安全帽数据集，直接训练 | 想尽快做出合规模型 |
+| A. 换数据集（推荐） | 找 `helmet / head` 两类的安全帽数据集，直接训练 | 想尽快做出合规模型 |
 | B. 自己补标 | 在当前 7,035 张图上补 `helmet` 框，把裸头标成 `head` | 有标注人力、想用现成图片 |
 | C. 两阶段（备选） | 先用当前数据训练 head 检测器，再裁头训练 helmet/no_helmet 分类器 | 不想重标整图，但能接受更复杂的管线 |
 
 路线 A 的数据来源：到 [Roboflow Universe](https://universe.roboflow.com/) 搜索 `safety helmet` / `hard hat`，下载前先看三点：
 
-1. Classes 是否包含 `helmet`、`head`（最好还有 `person`）；
+1. Classes 是否包含 `helmet`、`head`（只有 `head` 一类的不能用，见上文）；
 2. 是否提供 YOLO11 / YOLOv8 格式；
 3. License 是否允许你的参赛/展示用途。
 
@@ -167,17 +167,14 @@ python -c "from ultralytics import YOLO; print(YOLO('yolo11n.pt'))"
 
 ### 3.1 推荐类别
 
-建议三类：
+本项目用两类（2026-11-01 起，`person` 已从数据里删除）：
 
 | ID | 名称 | 标注对象 | 不要标 |
 |---:|---|---|---|
 | 0 | `head` | **未戴安全帽的裸头** | 戴了安全帽的头、严重遮挡看不清的头 |
 | 1 | `helmet` | 戴在头上的安全帽 | 拿在手里、放在地上、挂在墙上的安全帽 |
-| 2 | `person` | 画面中可见的施工人员 | 衣服、人偶、照片里的人 |
 
 关键点：`head` 是“裸头”，不是“所有头”。如果所有头都标成 `head`，模型还是分不出戴没戴。
-
-如果只想先做两类，也可以：
 
 ```yaml
 names:
@@ -185,7 +182,8 @@ names:
   1: helmet
 ```
 
-但没有 `person` 时，后处理只能按“头”做统计，无法稳定地把头盔关联到具体人员。比赛项目建议三类。
+需要“人”框时不要在标签里加回 `person`：直接用 COCO 预训练的 `yolo11s.pt` 单独跑 person，
+和安全帽模型的两路结果在业务层合并（见 [标签规则](标签规则.md) v1.2）。
 
 另外，工作区里的 `D-Fire` 是另一项任务的数据，不建议和安全帽数据混在一起；除非你明确要做多任务模型，否则分开训练。
 
@@ -236,18 +234,18 @@ train: images/train
 val: images/val
 test: images/test
 
+nc: 2
 names:
   0: head
   1: helmet
-  2: person
 ```
 
 注意：
 
 - 路径用 `/` 或双反斜杠，不要用单个 `\`。
 - `path` 建议写绝对路径，最不容易出错。
-- `names` 的顺序必须和标签里的 class_id 一致：本项目的固定顺序是 `0 head`、`1 helmet`、`2 person`（见[标签规则](标签规则.md)）。
-- `names` 在训练时会被写进权重文件，**改 `data.yaml` 不会自动改旧的 `best.pt`**。换了类序要重训一次，或者在推理前手动设 `model.names = {0: 'head', 1: 'helmet', 2: 'person'}`，否则画出来的标签还是错的。
+- `names` 的顺序必须和标签里的 class_id 一致：本项目的固定顺序是 `0 head`、`1 helmet`（见[标签规则](标签规则.md)）。
+- `names` 在训练时会被写进权重文件，**改 `data.yaml` 不会自动改旧的 `best.pt`**。换了类序要重训一次，或者在推理前手动设 `model.names = {0: 'head', 1: 'helmet'}`，否则画出来的标签还是错的。
 - 不要把 `nc` 和 `names` 写冲突；Ultralytics 会从 `names` 推断类别数。
 
 ### 3.4 当前 head 数据怎么处理
@@ -493,14 +491,13 @@ for result in results:
 检测模型只输出框和类别；“是否违规”要在业务层做：
 
 ```text
-person 框
-  → 取头部区域
-  → 匹配 helmet / head
+helmet / head 框（本项目两类模型）
   → 连续帧投票
   → 告警/忽略
 ```
 
-这部分对应项目文档里的 5.4 节。
+需要“人在哪”时，再用 COCO 预训练权重单独跑一路 person，把头部框和 person 框按位置关联；
+两路模型分开训练、分开评估，业务层合并。这部分对应项目文档里的 5.4 节。
 
 ---
 
@@ -545,7 +542,7 @@ TensorRT 可以后面再做。Windows 上 TensorRT 安装和版本匹配比较�
 | 天数 | 任务 | 产出 |
 |---|---|---|
 | 第 1 天 | 建 venv、装 PyTorch/Ultralytics、确认 GPU | `torch.cuda.is_available() == True` |
-| 第 2 天 | 确定类别，准备 helmet/head/person 数据 | 数据目录 + `data.yaml` |
+| 第 2 天 | 确定类别，准备 helmet/head 两类数据 | 数据目录 + `data.yaml` |
 | 第 3 天 | 跑数据检查，训练 YOLO11s 基线 | `best.pt`、`results.csv` |
 | 第 4 天 | 看验证集、混淆矩阵、错误样本 | 问题清单 |
 | 第 5 天 | 补难例/修标签，重训一版 | 第二版模型 |
@@ -559,7 +556,7 @@ TensorRT 可以后面再做。Windows 上 TensorRT 安装和版本匹配比较�
 ## 10. 验收清单
 
 - [ ] `torch.cuda.is_available()` 为 True，且识别到 RTX 5060。
-- [ ] 数据类别不是只有 `head`，而是 `helmet` + `head`（最好加 `person`）。
+- [ ] 数据类别不是只有 `head`，而是 `helmet` + `head` 两类。
 - [ ] `data.yaml` 的 `path`、`train`、`val`、`test` 都能找到文件。
 - [ ] 每张图片都有同名标签，class_id 在范围内。
 - [ ] 训练完成，保存了 `best.pt` 和 `last.pt`。
@@ -578,8 +575,8 @@ TensorRT 可以后面再做。Windows 上 TensorRT 安装和版本匹配比较�
 
 1. **不要**把当前 `head` 数据直接当成安全帽数据训练比赛模型。
 2. 先用它跑通环境、训练、评估、推理的完整流程，确认 GPU 和代码没问题。
-3. 同时找一份 `helmet / head / person` 的数据；找不到就先用 500—1,000 张图试标，确认类别定义可行，再扩到 3,000 张以上。
-4. 如果不想重标整图，可以考虑路线 C：当前 head 检测器裁头 → 人工给裁出的头标 `helmet`/`no_helmet` → 训练分类器。但这条路线多了目标检测 + 分类两级，答辩时要解释清楚误差会累积，不如直接做三类检测干净。
+3. 同时找一份 `helmet / head` 的数据；找不到就先用 500—1,000 张图试标，确认类别定义可行，再扩到 3,000 张以上。
+4. 如果不想重标整图，可以考虑路线 C：当前 head 检测器裁头 → 人工给裁出的头标 `helmet`/`no_helmet` → 训练分类器。但这条路线多了目标检测 + 分类两级，答辩时要解释清楚误差会累积，不如直接做两类检测干净。
 
 ---
 

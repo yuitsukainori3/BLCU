@@ -1,9 +1,11 @@
+# 注意：该目录下的标签全部是 class 0 = head（Roboflow raw 版，只有一个类），
+# 这里的 names 只是为了让脚本能跑通；真训练前必须先把标签补成 head / helmet 两类。
 path: F:\Competition\ultralytics-8.3.163\ultralytics-8.3.163\datasets\Hard Hat Workers.v14-raw_headclassonly.yolov11
 train: train/images
 val: valid/images
 test: test/images
 
+nc: 2
 names:
   0: head
   1: helmet
-  2: person

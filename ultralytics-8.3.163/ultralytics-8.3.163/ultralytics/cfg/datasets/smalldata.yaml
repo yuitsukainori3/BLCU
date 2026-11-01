@@ -1,11 +1,10 @@
-# 小数据集标签规范：head / helmet / person（类序以此为准，见 docs/标签规则.md）
+# 小数据集标签规范：head / helmet（两类，person 已删除；见 docs/标签规则.md）
 # helmet 与 head 在同一头顶互斥；图片由 make_small_dataset.py 抽出，标签由团队重新标注。
 path: F:\Competition\ultralytics-8.3.163\ultralytics-8.3.163\datasets\small_dataset
 train: images/train
 val: images/val
 
-nc: 3
+nc: 2
 names:
   0: head
   1: helmet
-  2: person
