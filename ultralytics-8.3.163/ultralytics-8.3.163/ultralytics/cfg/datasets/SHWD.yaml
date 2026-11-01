@@ -1,0 +1,8 @@
+# 由 convert_shwd.py 生成：SHWD/VOC2028 -> YOLO，hat=helmet(1), person=head(0)
+path: F:\Competition\ultralytics-8.3.163\ultralytics-8.3.163\datasets\shwd
+train: images/train
+val: images/val
+#test: images/test
+
+nc: 2
+names: ['head', 'helmet']
