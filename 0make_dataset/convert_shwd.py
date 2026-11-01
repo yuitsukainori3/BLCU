@@ -23,6 +23,7 @@ data.yaml 直接指向列表文件，Ultralytics 能直接读，不额外占几�
 用法
 ----
 python convert_shwd.py                       # 默认：只转带 hat 的图，写到 F:\Competition\datasets\shwd
+python convert_shwd.py --materialize hardlink  # 图片也放进 images/<split>（同盘硬链接，不占空间）
 python convert_shwd.py --include-no-hat      # 全量（含 SCUT-HEAD 部分）
 python convert_shwd.py --min-short 200       # 丢掉短边 < 200px 的小图
 python convert_shwd.py --drop-hat-area 0.5   # 丢掉"单个 hat 框 > 半个画面"的产品特写
@@ -35,7 +36,9 @@ from __future__ import annotations
 
 import argparse
 import collections
+import os
 import random
+import shutil
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -63,6 +66,8 @@ def parse_args(argv=None):
     p.add_argument("--drop-hat-area", type=float, default=0.0,
                    help="单个 hat 框面积超过整图该比例就跳过整张图（0 = 不启用，0.5 可去产品特写）")
     p.add_argument("--preview", type=int, default=6, help="输出几张画好框的预览图，0 = 不输出")
+    p.add_argument("--materialize", choices=("none", "hardlink", "copy"), default="none",
+                   help="把图片也放进 dst/images/<split>/：hardlink 不占空间（同盘推荐），copy 真复制")
     p.add_argument("--dry-run", action="store_true", help="只统计，不写任何文件")
     p.add_argument("--seed", type=int, default=0, help="预览图抽样种子")
     return p.parse_args(argv)
@@ -186,13 +191,39 @@ def main(argv=None) -> int:
     for split in SPLITS:
         (dst / f"{split}.txt").write_text("\n".join(lists[split]) + "\n", encoding="utf-8")
 
+    # 可选：把图片也放进 dst/images/<split>/。hardlink 在同一块盘上不占额外空间。
+    if args.materialize != "none":
+        linked = copied = existed = 0
+        for stem, split, img_path, _ in rows:
+            target_dir = dst / "images" / split
+            target_dir.mkdir(parents=True, exist_ok=True)
+            target = target_dir / img_path.name
+            if target.exists():
+                existed += 1
+                continue
+            try:
+                if args.materialize == "hardlink":
+                    os.link(img_path, target)
+                    linked += 1
+                else:
+                    shutil.copy2(img_path, target)
+                    copied += 1
+            except OSError:  # 跨盘或不支持硬链接时退回复制
+                shutil.copy2(img_path, target)
+                copied += 1
+        print(f"图片：hardlink {linked}，copy {copied}，已存在 {existed} -> {dst / 'images'}")
+
     names = ", ".join(f"'{n}'" for n in CLASS_NAMES)
+    if args.materialize != "none":
+        train_ref, val_ref, test_ref = "images/train", "images/val", "images/test"
+    else:
+        train_ref, val_ref, test_ref = "train.txt", "val.txt", "test.txt"
     (dst / "data.yaml").write_text(
         "# 由 convert_shwd.py 生成：SHWD/VOC2028 -> YOLO，hat=helmet(1), person=head(0)\n"
         f"path: {dst.as_posix()}\n"
-        f"train: train.txt\n"
-        f"val: val.txt\n"
-        f"test: test.txt\n\n"
+        f"train: {train_ref}\n"
+        f"val: {val_ref}\n"
+        f"test: {test_ref}\n\n"
         f"nc: {len(CLASS_NAMES)}\n"
         f"names: [{names}]\n",
         encoding="utf-8",
@@ -222,8 +253,11 @@ def main(argv=None) -> int:
             print(f"[警告] 预览图生成失败：{type(exc).__name__}: {exc}", file=sys.stderr)
 
     print(f"\n输出目录 {dst}")
-    print("  data.yaml / train.txt / val.txt / test.txt / labels/")
-    print("  训练：python Train.py 前先把 data 指向这个 data.yaml")
+    if args.materialize != "none":
+        print("  data.yaml / images/{train,val,test} / labels/{train,val,test} / preview/")
+    else:
+        print("  data.yaml / train.txt / val.txt / test.txt / labels/ / preview/")
+    print("  训练：把 data 指向这个 data.yaml 即可")
     return 0
 
 
