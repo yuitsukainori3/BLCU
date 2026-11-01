@@ -26,6 +26,11 @@ runs/
 *.onnx
 *.engine
 
+# 本地下载的公开数据集与抽样产物（体积大，不进 Git）
+0make_dataset/VOC2028/
+0make_dataset/images/
+0make_dataset/small_dataset/move_manifest.csv
+
 # Runtime data / local databases
 data/
 logs/
