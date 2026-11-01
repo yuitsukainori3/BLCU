@@ -2,15 +2,21 @@
 # -*- coding: utf-8 -*-
 """从 YOLO 数据集里抽一小份子集：默认**只搬图片，不动标签**。
 
+抽样规则
+--------
+- train 只从源的 train 抽；
+- val 只从源的 valid 抽；
+- 两边互不重叠，比例由 --train-ratio 决定（默认 7:3）。
+
 默认行为
 --------
 源：F:\\Competition\\ultralytics-8.3.163\\ultralytics-8.3.163\\datasets\\
-    Hard Hat Workers.v14-raw_headclassonly.yolov11  （train 共 4916 张）
-量：100 张
-分：70 张 -> small_dataset\\images\\train
-    30 张 -> small_dataset\\images\\val
+    Hard Hat Workers.v14-raw_headclassonly.yolov11
+量：50 张
+分：35 张 -> small_dataset\\images\\train（来自源 train）
+    15 张 -> small_dataset\\images\\val（来自源 valid）
 标签：默认不搬。源目录里的 .txt 原样保留，small_dataset 下不会出现旧标签；
-      团队按自己的规范（person / helmet / head）重新标注。
+      团队按自己的规范（head / helmet）重新标注。
       需要连旧标签一起搬时加 --with-labels。
 
 移动是“从源目录剪切”，跑一次源数据就少一批图片，不能靠重跑得到同样的结果。
@@ -18,12 +24,11 @@
 
 用法
 ----
-python make_small_dataset.py                     # 默认 100 张，只搬图片
+python make_small_dataset.py                     # 默认 50 张：train 35 + val 15
 python make_small_dataset.py --dry-run           # 只打印计划，不动文件
-python make_small_dataset.py --num 200           # 抽 200 张
-python make_small_dataset.py --names person,helmet,head   # 顺手生成 3 类 data.yaml
+python make_small_dataset.py --num 100           # 100 张 -> train 70 + val 30
+python make_small_dataset.py --names head,helmet # 顺手生成两类 data.yaml
 python make_small_dataset.py --with-labels       # 连旧标签一起搬（一般不用）
-python make_small_dataset.py --source-split all  # train/valid/test 混着抽
 
 退出码：0 成功；1 参数或环境错误；2 目标冲突（不会动任何文件）。
 """
@@ -49,7 +54,8 @@ SRC_DEFAULT = Path(
 DST_DEFAULT = Path(__file__).resolve().parent / "small_dataset"
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
-SPLITS = ("train", "valid", "test")
+TRAIN_SPLIT = "train"
+VAL_SPLIT = "valid"
 
 MANIFEST_NAME = "move_manifest.csv"
 MANIFEST_HEADER = ["time", "source_split", "part", "source_image", "dest_image",
@@ -112,24 +118,29 @@ def collect_items(src_root: Path, splits: tuple[str, ...], with_labels: bool):
     return items, missing
 
 
-def pick(items, num: int, train_ratio: float, seed: int):
-    """随机抽 num 个并打上 train/val 归属。"""
+def pick(train_items, val_items, num: int, train_ratio: float, seed: int):
+    """train 只从源 train 抽，val 只从源 valid 抽，两边互不重叠。"""
     if num < 2:
         die("--num 至少为 2，否则分不出 train 和 val")
     if not 0.0 < train_ratio < 1.0:
         die("--train-ratio 必须在 0 和 1 之间")
-    if num > len(items):
-        die(f"可用的图片只有 {len(items)} 张，不够抽 {num} 张")
 
-    picked = random.Random(seed).sample(items, num)
     # 常规四舍五入（round 在 .5 处是“银行家舍入”，这里不用）
     n_train = int(num * train_ratio + 0.5)
     n_train = max(1, min(num - 1, n_train))  # 两边都至少留 1 张
+    n_val = num - n_train
 
-    plan = []
-    for index, (img, label, split) in enumerate(picked):
-        target = "train" if index < n_train else "val"
-        plan.append((img, label, split, target))
+    if n_train > len(train_items):
+        die(f"源 train 只有 {len(train_items)} 张，不够抽 {n_train} 张")
+    if n_val > len(val_items):
+        die(f"源 valid 只有 {len(val_items)} 张，不够抽 {n_val} 张")
+
+    rng = random.Random(seed)
+    picked_train = rng.sample(train_items, n_train)
+    picked_val = rng.sample(val_items, n_val)
+
+    plan = [(img, label, TRAIN_SPLIT, "train") for img, label, _ in picked_train]
+    plan += [(img, label, VAL_SPLIT, "val") for img, label, _ in picked_val]
     return plan
 
 
@@ -138,18 +149,18 @@ def pick(items, num: int, train_ratio: float, seed: int):
 
 def build_dest_plan(plan, dst_root: Path):
     """分配目标文件名，返回 [(src_img, src_lbl, dst_img, dst_lbl, split, part)]。"""
-    used: dict[str, Path] = {}
+    used: dict[tuple[str, str], Path] = {}
     rows = []
     for src_img, src_lbl, split, part in plan:
         stem = src_img.stem
-        # 同名文件：换 split 抽的时候可能撞上，加 split 后缀区分
-        if stem in used:
+        # 只有同一个 part 里重名才加后缀；train / val 目录不同，同名互不影响
+        if (part, stem) in used:
             stem = f"{stem}_{split}"
             counter = 2
-            while stem in used:
+            while (part, stem) in used:
                 stem = f"{src_img.stem}_{split}{counter}"
                 counter += 1
-        used[stem] = src_img
+        used[(part, stem)] = src_img
 
         dst_img = dst_root / "images" / part / f"{stem}{src_img.suffix.lower()}"
         dst_lbl = dst_root / "labels" / part / f"{stem}.txt" if src_lbl is not None else None
@@ -303,20 +314,19 @@ def report(dst_root: Path, with_labels: bool) -> bool:
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(
-        description="从 YOLO 数据集中移动一批图片（默认不动标签），按比例做成小数据集",
+        description="从 YOLO 数据集中移动一批图片（默认不动标签）：train 从源 train 抽，val 从源 valid 抽",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--src", type=Path, default=SRC_DEFAULT, help="源 YOLO 数据集根目录")
     parser.add_argument("--dst", type=Path, default=DST_DEFAULT, help="小数据集输出根目录")
     parser.add_argument("--num", type=int, default=50, help="一共抽多少张图片")
-    parser.add_argument("--train-ratio", type=float, default=0.7, help="train 占比")
+    parser.add_argument("--train-ratio", type=float, default=0.7,
+                        help="train 占比（其余从源 valid 抽给 val）")
     parser.add_argument("--seed", type=int, default=42, help="随机种子，固定后抽样可复现")
-    parser.add_argument("--source-split", choices=("train", "valid", "test", "all"),
-                        default="train", help="从源的哪些 split 里抽")
     parser.add_argument("--with-labels", action="store_true",
                         help="连旧标签一起移动（默认只搬图片）")
     parser.add_argument("--names", default=None,
-                        help="生成 data.yaml 用的类别名，逗号分隔，如 person,helmet,head")
+                        help="生成 data.yaml 用的类别名，逗号分隔，如 head,helmet")
     parser.add_argument("--dry-run", action="store_true", help="只打印计划，不移动文件")
     parser.add_argument("--force", action="store_true",
                         help="目标已有同名文件时覆盖（默认直接报错，不动任何文件）")
@@ -335,24 +345,23 @@ def main(argv=None) -> int:
     if src_root == dst_root:
         die("源目录和目标目录不能是同一个")
 
-    splits = SPLITS if args.source_split == "all" else (args.source_split,)
-    splits = tuple(s for s in splits if (src_root / s / "images").is_dir())
-    if not splits:
-        die(f"{src_root} 下没有找到可用的 split（train/valid/test）")
-
     started = time.time()
-    items, missing = collect_items(src_root, splits, args.with_labels)
+    train_items, train_missing = collect_items(src_root, (TRAIN_SPLIT,), args.with_labels)
+    val_items, val_missing = collect_items(src_root, (VAL_SPLIT,), args.with_labels)
+    missing = train_missing + val_missing
 
     log(f"源目录 : {src_root}")
-    log(f"抽样范围: {', '.join(splits)}，可用图片 {len(items)} 张")
+    log(f"可用图片: train {len(train_items)} 张 / valid {len(val_items)} 张")
+    log("抽样规则: train 只从源 train 抽，val 只从源 valid 抽")
     log(f"标签   : {'随图片一起搬' if args.with_labels else '不动（源目录 .txt 原样保留）'}")
     if missing:
         log(f"[提示] {len(missing)} 张图片没有同名标签，已跳过（例：{missing[0].name}）")
 
-    rows = build_dest_plan(pick(items, args.num, args.train_ratio, args.seed), dst_root)
+    rows = build_dest_plan(
+        pick(train_items, val_items, args.num, args.train_ratio, args.seed), dst_root)
     n_train = sum(1 for row in rows if row[5] == "train")
-    log(f"抽取   : {len(rows)} 张 -> train {n_train} / val {len(rows) - n_train}"
-        f"（种子 {args.seed}）")
+    log(f"抽取   : {len(rows)} 张 -> train {n_train}（源 train）/ "
+        f"val {len(rows) - n_train}（源 valid）（种子 {args.seed}）")
 
     conflicts = find_conflicts(rows)
     if conflicts and not args.force:
@@ -430,8 +439,8 @@ def main(argv=None) -> int:
     log("")
     log(f"搬走图片 {len(rows)} 张，合计 {human_size(total_bytes)}，用时 {elapsed:.1f}s")
     log(f"清单: {manifest_path}")
-    remaining_imgs = count_files(src_root / splits[0] / "images") if len(splits) == 1 else "见各 split"
-    log(f"源目录剩余图片（{', '.join(splits)}）: {remaining_imgs}")
+    log(f"源目录剩余图片: train {count_files(src_root / TRAIN_SPLIT / 'images')} 张 / "
+        f"valid {count_files(src_root / VAL_SPLIT / 'images')} 张")
     if not ok:
         log("[警告] 目标目录有异常，请检查上面的提示")
         return 1
