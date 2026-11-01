@@ -30,7 +30,11 @@ import sys
 from pathlib import Path
 
 OWN_DEFAULT = Path(r"F:\Competition\ultralytics-8.3.163\ultralytics-8.3.163\datasets\small_dataset")
-SHWD_DEFAULT = Path(r"F:\Competition\datasets\shwd")
+SHWD_CANDIDATES = [
+    Path(r"F:\Competition\ultralytics-8.3.163\ultralytics-8.3.163\datasets\shwd"),
+    Path(r"F:\Competition\datasets\shwd"),
+]
+SHWD_DEFAULT = next((p for p in SHWD_CANDIDATES if (p / "images").is_dir()), SHWD_CANDIDATES[0])
 DST_DEFAULT = Path(r"F:\Competition\datasets\merged")
 EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
