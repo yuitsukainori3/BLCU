@@ -15,6 +15,10 @@
 python scripts/eval_report.py --weights runs/detect/train4/weights/best.pt --split val
 python scripts/eval_report.py --weights ... --split test
 python scripts/eval_report.py --weights ... --split val --append docs/评测记录.md
+python scripts/eval_report.py --weights ... --split val --no-slices     # 只要 AP，不分层
+
+默认会额外输出“按尺寸 / 按亮度 / 按拥挤度”三张分层表（只算 head），
+它内部调用 error_analysis.py 做逐框匹配，结果落在 runs/eval/_slices/<split>/boxes_<split>.csv。
 
 退出码：0 成功；1 参数错误或评测失败。
 """
@@ -22,7 +26,9 @@ python scripts/eval_report.py --weights ... --split val --append docs/评测记�
 from __future__ import annotations
 
 import argparse
+import csv
 import datetime as _dt
+import subprocess
 import sys
 from pathlib import Path
 
@@ -45,8 +51,59 @@ def parse_args(argv=None):
     p.add_argument("--device", default="0")
     p.add_argument("--append", type=Path, default=None, help="把一行结果追加到这张 markdown 表里")
     p.add_argument("--out", type=Path, default=None, help="把完整报告写到这个文件")
+    p.add_argument("--no-slices", action="store_true", help="跳过分层评测（按尺寸/亮度/拥挤度）")
+    p.add_argument("--error-csv", type=Path, default=None, help="复用已有的 boxes_<split>.csv，不重新跑匹配")
     p.add_argument("--quiet", action="store_true")
     return p.parse_args(argv)
+
+
+def _run_error_analysis(weights: Path, data: Path, split: str, imgsz: int, device: str) -> Path:
+    """调 error_analysis.py 生成逐框 CSV（复用它的匹配逻辑，避免两套实现漂移）。"""
+    out_dir = Path(__file__).resolve().parent.parent / "runs" / "eval" / "_slices" / split
+    out_dir.mkdir(parents=True, exist_ok=True)
+    script = Path(__file__).with_name("error_analysis.py")
+    cmd = [sys.executable, str(script), "--weights", str(weights), "--data", str(data),
+           "--split", split, "--imgsz", str(imgsz), "--device", str(device),
+           "--out", str(out_dir), "--save-crops", "0"]
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
+    return out_dir / f"boxes_{split}.csv"
+
+
+def _slice_tables(csv_path: Path) -> str:
+    """按目标尺寸 / 图像亮度 / 图像拥挤度切三张表，只看 head。"""
+    with csv_path.open(encoding="utf-8-sig") as f:
+        rows = [r for r in csv.DictReader(f) if r["gt_cls"] == "0"]
+    if not rows:
+        return ""
+
+    def agg(sel):
+        n = len(sel)
+        if not n:
+            return None
+        ok = sum(1 for r in sel if r["kind"].startswith("A"))
+        wrong = sum(1 for r in sel if r["kind"] == "B_误合规")
+        return n, ok / n, wrong / n
+
+    def table(title, buckets, key):
+        lines = [f"**{title}**", "", fmt_row(["区间", "框数", "违规召回", "误合规"]), fmt_row(["---"] * 4)]
+        for label, lo, hi in buckets:
+            sel = [r for r in rows if lo <= key(r) < hi]
+            s = agg(sel)
+            if s:
+                lines.append(fmt_row([label, s[0], f"{s[1]:.1%}", f"{s[2]:.1%}"]))
+        return "\n".join(lines + [""])
+
+    out = ["分层评测（只算 head）", ""]
+    out.append(table("按目标尺寸（px）", [
+        ("<15", 0, 15), ("15—30", 15, 30), ("30—60", 30, 60), (">60", 60, 10**9),
+    ], lambda r: float(r["w_px"])))
+    out.append(table("按图像亮度", [
+        ("暗 <80", -1, 80), ("中 80—110", 80, 110), ("亮 >110", 110, 10**9),
+    ], lambda r: float(r["brightness"])))
+    out.append(table("按图像拥挤度（同图 GT 数）", [
+        ("疏 <8", 0, 8), ("中 8—12", 8, 13), ("密 ≥13", 13, 10**9),
+    ], lambda r: float(r["n_gt_image"])))
+    return "\n".join(out)
 
 
 def fmt_row(cells) -> str:
@@ -115,6 +172,17 @@ def main(argv=None) -> int:
         lines.append("")
 
     report = "\n".join(lines)
+
+    if not args.no_slices:
+        try:
+            csv_path = args.error_csv or _run_error_analysis(weights, Path(args.data), args.split,
+                                                             args.imgsz, str(args.device))
+            slices = _slice_tables(csv_path)
+            if slices:
+                report = report + "\n" + slices
+        except Exception as exc:  # 分层评测失败不影响主报告
+            print(f"[警告] 分层评测跳过：{type(exc).__name__}: {exc}", file=sys.stderr)
+
     if not args.quiet:
         print(report)
     if args.out:
