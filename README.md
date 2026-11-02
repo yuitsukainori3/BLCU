@@ -81,7 +81,7 @@ ultralytics-8.3.163/ultralytics-8.3.163/Train.py
 ## 文档
 
 - [项目设计文档](docs/安全帽智检_项目文档_V0.1.docx)
-- [项目初期方案](docs/项目初期方案.md)（给指导老师的初期方案，简版）
+- [项目初期方案](docs/项目初期方案.md)（给指导老师的初期方案，简版；[Word 版](docs/项目初期方案.docx)）
 - [标签规则](docs/标签规则.md)（head / helmet 两类标注规范，v1.2）
 - [YOLO11 安全帽模型训练指南](docs/YOLO11安全帽模型训练指南.md)
 - [通用版训练指南](docs/YOLO11安全帽模型训练指南_通用版.md)
