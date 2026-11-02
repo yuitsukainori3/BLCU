@@ -1,5 +1,3 @@
-from jinja2 import defaults
-
 from ultralytics import YOLO
 
 if __name__ == '__main__':
@@ -8,7 +6,7 @@ if __name__ == '__main__':
         data=r"SHWD.yaml",
         epochs=50,
         batch=-1,
-        imgsz=640,
-        cache="ram",
-        workers=8,
+        imgsz=960,
+        cache="disk",
+        workers=4,
     )
