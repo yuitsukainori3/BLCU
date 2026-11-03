@@ -72,6 +72,32 @@ python -c "import ultralytics; print(ultralytics.__file__)"
 yolo checks
 ```
 
+## 视频展示原型
+
+在 Python 环境中安装仓库根目录的 `requirements.txt`，准备 SHWD 两类数据和有效的 YOLO11 权重后：
+
+```powershell
+python -m pip install -r requirements.txt
+python -m streamlit run app.py
+```
+
+页面支持上传本地视频、960 高分辨率 head/helmet 推理、COCO 人体跟踪、滑窗事件去抖、疑似事件列表和分区风险摘要。视频事件只作为人工复核候选。
+
+改进训练入口：
+
+```powershell
+python scripts/train_improved.py --data datasets/shwd/data.yaml --model yolo11s.pt --imgsz 960 --epochs 120
+```
+
+如需试验裸头类重采样（只作用于训练图片，不复制或调整验证/测试集）：
+
+```powershell
+python scripts/build_balanced_dataset.py --data datasets/shwd/data.yaml --repeat 2
+python scripts/train_improved.py --data runs/data/head_repeated/helmet_head_repeated.yaml --name helmet_head_repeated
+```
+
+每项训练改动需与当前基线在相同验证/测试划分、相同阈值口径下对比；重复采样可能过拟合，不能预设它一定提升。
+
 后端、前端和 `ml/` 的依赖等框架确定后再补；目前不要假设已经能启动完整应用。
 
 ## 数据和权重
