@@ -120,11 +120,13 @@ def main(argv=None) -> int:
     from ultralytics import YOLO
 
     model = YOLO(str(weights))
-    results = model.predict([str(p) for p in img_files], imgsz=args.imgsz, conf=args.low_conf,
-                            iou=0.7, max_det=300, device=args.device, verbose=False, stream=False)
 
     records = []
-    for img_path, res in zip(img_files, results):
+    # 逐张推理：一次 predict 整批会把 282 张的中间结果都留在显存里，
+    # 960 输入下 8 GB 卡必然 OOM（实测在 conv 前向就炸）。逐张跑最稳。
+    for img_path in img_files:
+        res = model.predict(str(img_path), imgsz=args.imgsz, conf=args.low_conf,
+                            iou=0.7, max_det=300, device=args.device, verbose=False)[0]
         h, w = res.orig_shape
         gt = load_gt(root / "labels" / args.split / f"{img_path.stem}.txt", w, h)
         pred = np.hstack([res.boxes.xyxy.cpu().numpy(), res.boxes.conf.cpu().numpy()[:, None]])
