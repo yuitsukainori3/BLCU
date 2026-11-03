@@ -7,6 +7,7 @@ if __name__ == '__main__':
         epochs=50,
         batch=-1,
         imgsz=960,
-        cache="disk",
-        workers=4,
+        cache="ram",
+        workers=0,
+        name="imgsz960"
     )

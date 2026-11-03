@@ -120,6 +120,17 @@ def main(argv=None) -> int:
 
     from ultralytics import YOLO
 
+    # 先跑分层评测（独立子进程，自带一次推理），再在本进程做 val。
+    # 顺序不能反：本进程 val 之后会占住显存，子进程再进来就会 CUDA OOM。
+    slices = ""
+    if not args.no_slices:
+        try:
+            csv_path = args.error_csv or _run_error_analysis(weights, Path(args.data), args.split,
+                                                             args.imgsz, str(args.device))
+            slices = _slice_tables(csv_path)
+        except Exception as exc:  # 分层评测失败不影响主报告
+            print(f"[警告] 分层评测跳过：{type(exc).__name__}: {exc}", file=sys.stderr)
+
     model = YOLO(str(weights))
     r = model.val(
         data=str(args.data), split=args.split, imgsz=args.imgsz, batch=args.batch,
@@ -172,16 +183,8 @@ def main(argv=None) -> int:
         lines.append("")
 
     report = "\n".join(lines)
-
-    if not args.no_slices:
-        try:
-            csv_path = args.error_csv or _run_error_analysis(weights, Path(args.data), args.split,
-                                                             args.imgsz, str(args.device))
-            slices = _slice_tables(csv_path)
-            if slices:
-                report = report + "\n" + slices
-        except Exception as exc:  # 分层评测失败不影响主报告
-            print(f"[警告] 分层评测跳过：{type(exc).__name__}: {exc}", file=sys.stderr)
+    if slices:
+        report = report + "\n" + slices
 
     if not args.quiet:
         print(report)
