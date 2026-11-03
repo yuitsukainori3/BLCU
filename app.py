@@ -3,12 +3,14 @@ from __future__ import annotations
 import tempfile
 import os
 import sys
+import time
 from pathlib import Path
 
 import cv2
 import pandas as pd
 import streamlit as st
-from ml.pipeline import EventEngine, annotate, assign_head_to_person, collect_boxes, model_path_or_pointer, region_summary
+from ml.pipeline import (EventEngine, annotate, assign_head_to_person, collect_boxes,
+                         model_path_or_pointer, propagate_boxes, region_summary, smooth_boxes)
 
 ROOT = Path(__file__).resolve().parent
 VENDORED_ULTRALYTICS = ROOT / "ultralytics-8.3.163" / "ultralytics-8.3.163"
@@ -45,7 +47,8 @@ with st.sidebar:
     person_weight = st.text_input("人员跟踪模型（COCO）", "yolo11n.pt")
     conf_head = st.slider("裸头阈值", .05, .8, .18, .01)
     conf_helmet = st.slider("安全帽阈值", .05, .8, .30, .01)
-    frame_stride = st.slider("抽帧间隔", 1, 12, 2)
+    frame_stride = st.slider("抽帧间隔", 1, 12, 12,
+                             help="每隔 N 帧进行一次模型推理。设为 12 可显著缩短长视频分析时间。")
     region_names = st.text_input("监测区域（逗号分隔）", "东侧作业区,西侧作业区,材料区")
     vote_n = st.slider("连续观察帧数", 3, 30, 10)
     vote_ratio = st.slider("违规帧比例门槛", .3, 1.0, .6, .05)
@@ -73,10 +76,18 @@ with tab_monitor:
                 output = Path(td) / "annotated.mp4"
                 source.write_bytes(clip.getvalue())
                 cap = cv2.VideoCapture(str(source))
+                if not cap.isOpened():
+                    st.error("视频无法解码。请尝试转为常见的 H.264 编码 MP4 后再上传。")
+                    st.stop()
                 fps = cap.get(cv2.CAP_PROP_FPS) or 25
                 width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)); height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                 total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
                 writer = cv2.VideoWriter(str(output), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
+                if not writer.isOpened():
+                    cap.release()
+                    st.error("当前环境无法创建 MP4 输出文件，请换用兼容的视频编码格式。")
+                    st.stop()
+                status.info("正在加载安全帽和人员模型……首次分析会有短暂预热。")
                 head_model = YOLO(weight_file)
                 people_model = YOLO(person_weight)
                 engine = EventEngine(window=vote_n, violation_ratio=vote_ratio, min_observations=max(3, vote_n // 2))
@@ -85,9 +96,15 @@ with tab_monitor:
                 progress = st.progress(0)
                 frame_idx = 0
                 snapshots = []
+                display_boxes = []
+                previous_gray = None
+                started_at = time.perf_counter()
+                status.info(f"模型已加载，开始分析 {total:,} 帧；抽帧间隔为 {frame_stride}。")
                 while True:
                     ret, frame = cap.read()
                     if not ret: break
+                    current_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                    frame_events = []
                     if frame_idx % frame_stride == 0:
                         person_result = people_model.track(frame, persist=True, imgsz=640, conf=.35,
                                                            classes=[0], tracker="bytetrack.yaml", verbose=False)[0]
@@ -96,7 +113,6 @@ with tab_monitor:
                         detected = collect_boxes(helmet_result, helmet_result.names,
                                                  {"head": conf_head, "helmet": conf_helmet})
                         timestamp = frame_idx / fps
-                        frame_events = []
                         for head in [b for b in detected if b.name in ("head", "helmet")]:
                             person = assign_head_to_person(head.xyxy, person_boxes)
                             if person is None or person.track_id is None:
@@ -110,13 +126,18 @@ with tab_monitor:
                                 frame_events.append(item)
                                 snapshots.append({"事件时间（秒）": timestamp, "跟踪ID": person.track_id,
                                                   "区域": region, "状态": "待复核", "帧号": frame_idx})
-                        shown = annotate(frame, person_boxes + detected, frame_events)
-                        writer.write(shown)
+                        display_boxes = smooth_boxes(person_boxes + detected, display_boxes)
                     else:
-                        writer.write(frame)
+                        display_boxes = propagate_boxes(previous_gray, current_gray, display_boxes)
+                    writer.write(annotate(frame, display_boxes, frame_events))
+                    previous_gray = current_gray
                     frame_idx += 1
                     if total and frame_idx % max(1, total // 100) == 0:
                         progress.progress(min(1.0, frame_idx / total))
+                        elapsed = time.perf_counter() - started_at
+                        remaining = max(0, total - frame_idx)
+                        eta = elapsed / max(1, frame_idx) * remaining
+                        status.info(f"正在分析：{frame_idx:,}/{total:,} 帧；已用时 {elapsed:.0f} 秒，预计还需 {eta:.0f} 秒。")
                 cap.release(); writer.release(); progress.progress(1.0)
                 if not output.is_file() or output.stat().st_size == 0:
                     st.error("未能生成检测视频。请检查输入视频格式和模型依赖。")

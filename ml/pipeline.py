@@ -76,6 +76,69 @@ def collect_boxes(result, names: dict[int, str], thresholds: dict[str, float]) -
     return out
 
 
+def smooth_boxes(new_boxes: list[Box], previous_boxes: list[Box], new_weight: float = .7) -> list[Box]:
+    """Blend refreshed detections with the optical-flow boxes to reduce frame-to-frame jumps."""
+    old_by_track = {b.track_id: b for b in previous_boxes if b.name == "person" and b.track_id is not None}
+    used: set[int] = set()
+    for box in new_boxes:
+        old = old_by_track.get(box.track_id) if box.name == "person" and box.track_id is not None else None
+        if old is None:
+            x1, y1, x2, y2 = box.xyxy
+            best_iou = 0.0
+            for idx, candidate in enumerate(previous_boxes):
+                if idx in used or candidate.name != box.name:
+                    continue
+                ox1, oy1, ox2, oy2 = candidate.xyxy
+                ix1, iy1 = max(x1, ox1), max(y1, oy1)
+                ix2, iy2 = min(x2, ox2), min(y2, oy2)
+                intersection = max(0, ix2 - ix1) * max(0, iy2 - iy1)
+                area_a = max(1, x2 - x1) * max(1, y2 - y1)
+                area_b = max(1, ox2 - ox1) * max(1, oy2 - oy1)
+                iou = intersection / (area_a + area_b - intersection)
+                if iou > best_iou:
+                    best_iou, old = iou, candidate
+            if best_iou < .1:
+                old = None
+        if old is not None:
+            used.add(previous_boxes.index(old))
+            box.xyxy = tuple(int(round(new_weight * new + (1 - new_weight) * old_value))
+                             for new, old_value in zip(box.xyxy, old.xyxy))
+    return new_boxes
+
+
+def propagate_boxes(previous_gray: np.ndarray | None, current_gray: np.ndarray,
+                    boxes: list[Box]) -> list[Box]:
+    """Carry boxes through skipped frames using sparse optical flow."""
+    if previous_gray is None or not boxes:
+        return boxes
+    height, width = current_gray.shape[:2]
+    for box in boxes:
+        x1, y1, x2, y2 = box.xyxy
+        x1c, y1c = max(0, x1), max(0, y1)
+        x2c, y2c = min(width, x2), min(height, y2)
+        if x2c - x1c < 4 or y2c - y1c < 4:
+            continue
+        roi = previous_gray[y1c:y2c, x1c:x2c]
+        points = cv2.goodFeaturesToTrack(roi, maxCorners=24, qualityLevel=.01,
+                                         minDistance=3, blockSize=3)
+        if points is None or len(points) < 3:
+            continue
+        points[:, 0, 0] += x1c
+        points[:, 0, 1] += y1c
+        moved, status, _ = cv2.calcOpticalFlowPyrLK(previous_gray, current_gray, points, None,
+                                                     winSize=(21, 21), maxLevel=3)
+        if moved is None or status is None:
+            continue
+        valid = status.reshape(-1).astype(bool)
+        if valid.sum() < 3:
+            continue
+        delta = np.median(moved[valid, 0] - points[valid, 0], axis=0)
+        dx, dy = int(round(float(delta[0]))), int(round(float(delta[1])))
+        box.xyxy = (max(0, x1 + dx), max(0, y1 + dy),
+                    min(width, x2 + dx), min(height, y2 + dy))
+    return boxes
+
+
 def annotate(frame: np.ndarray, boxes: list[Box], events: list[dict]) -> np.ndarray:
     image = frame.copy()
     colors = {"head": (40, 60, 245), "helmet": (60, 200, 80), "person": (235, 180, 35)}
