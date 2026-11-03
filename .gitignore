@@ -22,9 +22,12 @@ datasets/*
 weights/*
 !weights/README.md
 runs/
+!artifacts/latest/runs/
+!artifacts/latest/runs/**
 *.pt
 *.onnx
 *.engine
+!artifacts/weights/*.pt
 
 # 本地下载的公开数据集与抽样产物（体积大，不进 Git）
 0make_dataset/VOC2028/

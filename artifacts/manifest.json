@@ -1,0 +1,28 @@
+{
+  "version": "v0.1.0",
+  "created_at": "2026-11-03",
+  "model": {
+    "path": "artifacts/weights/helmet_v0.1.0.pt",
+    "sha256": "522f91e59a08a15972e2d122124fafaed56ed5ff3f37e51b55db99f86ac1eb9f",
+    "base": "yolo11s.pt",
+    "classes": [
+      "head",
+      "helmet"
+    ],
+    "source_run": "ultralytics-8.3.163/ultralytics-8.3.163/runs/detect/imgsz9602"
+  },
+  "runs": {
+    "path": "artifacts/latest/runs",
+    "source": "runs/",
+    "files": 53,
+    "bytes": 6937627
+  },
+  "bundle": {
+    "files": 56,
+    "bytes": 26139448
+  },
+  "metrics": {
+    "status": "见 artifacts/latest/runs 与 docs/实验记录.md；未在本清单重复填写"
+  },
+  "notes": "只同步当前版本；原始 runs/ 仍忽略。未做跨数据集比较。"
+}

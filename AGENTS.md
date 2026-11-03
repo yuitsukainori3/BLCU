@@ -56,3 +56,13 @@
 - 引用他人的观点、数据、代码或素材时，必须注明来源；
 - 不得通过简单改词、改变量名、调整排版等方式规避抄袭；
 - 不确定某种做法是否构成抄袭时，先向用户说明并确认，不得自行默认可以使用。
+
+### 6. 同步实验产物
+
+本仓库用 Git LFS 保存 `artifacts/` 下的评测图和模型。每次拉取代码后、开始分析或训练前，必须确认产物已真正下载，而不是 LFS 指针文件。
+
+- 首次使用先安装 Git LFS；
+- 每次 `git pull` 后运行 `git lfs pull`；
+- 再运行 `python scripts/sync_artifacts.py` 校验模型 SHA256；
+- 如果文件只有约 130 字节且以 `version https://git-lfs.github.com/spec/v1` 开头，说明还是指针文件，不得直接用于推理；
+- 原始 `runs/` 和 `datasets/` 仍不进 Git，只有 `artifacts/latest/` 和 `artifacts/weights/` 是共享产物。
