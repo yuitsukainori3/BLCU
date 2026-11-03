@@ -1,15 +1,16 @@
 # weights
 
-模型权重目录。**权重不进 Git**，只保留本说明。
+本地权重缓存目录。**权重不直接进 Git**，共享权重放在 `artifacts/weights/`（Git LFS）。
 
 使用方式：
 
-1. 从 GitHub Releases 或团队网盘下载权重；
-2. 放到本目录，例如：
+1. `git lfs install`（首次）；
+2. `git pull && git lfs pull`；
+3. 从 `artifacts/weights/` 复制需要的权重到本目录，例如：
    ```text
    weights/helmet_v0.1.0.pt
    ```
-3. 在 `models/manifest.json` 中登记版本、来源和 SHA256；
-4. 应用通过配置读取权重路径。
+4. 用 `python scripts/sync_artifacts.py` 校验 SHA256；
+5. 应用通过配置读取权重路径。
 
-不要提交 `*.pt`、`*.onnx`、`*.engine`。
+共享版本和 SHA256 见 `models/manifest.json`。不要提交 `*.pt`、`*.onnx`、`*.engine` 到普通 Git。

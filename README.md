@@ -17,6 +17,7 @@ BLCU/
 ├─ configs/              # 预留：数据/模型/阈值配置
 ├─ docs/                 # 项目文档、训练指南、数据分析
 ├─ models/               # 模型登记表（不放权重）
+├─ artifacts/            # 共享评测产物和模型（Git LFS）
 ├─ datasets/             # 数据目录（内容不进 Git，仅保留 README）
 ├─ weights/              # 权重目录（内容不进 Git，仅保留 README）
 ├─ scripts/              # 预留：下载、转换、部署脚本
@@ -28,10 +29,22 @@ BLCU/
 
 ## 快速开始
 
+本仓库的 `artifacts/` 使用 Git LFS 保存评测图和模型。**第一次 clone 前先安装 Git LFS**：
+
 ```bash
+git lfs install
 git clone https://github.com/yuitsukainori3/BLCU.git
 cd BLCU
+git lfs pull
 python -m venv .venv
+```
+
+如果已经 clone 过，执行：
+
+```bash
+git pull
+git lfs pull
+python scripts/sync_artifacts.py
 ```
 
 Windows：
@@ -63,12 +76,24 @@ yolo checks
 
 ## 数据和权重
 
-数据集和模型权重**不进 Git**：
+数据集和原始训练输出**不进 Git**：
 
 - 数据集放在 `datasets/`，说明见 [datasets/README.md](datasets/README.md)；
-- 权重放在 `weights/`，说明见 [weights/README.md](weights/README.md)；
-- 模型版本、指标、下载地址登记在 [models/manifest.json](models/manifest.json)；
-- 大文件通过团队网盘或 GitHub Releases 共享。
+- 原始 `runs/` 和 `weights/` 不提交，避免仓库膨胀；
+- 要共享的评测图和模型放在 `artifacts/`，由 Git LFS 管理，说明见 [artifacts/README.md](artifacts/README.md)；
+- 模型版本、指标和 SHA256 登记在 [models/manifest.json](models/manifest.json)。
+
+当前共享版本：
+
+- 模型：`artifacts/weights/helmet_v0.1.0.pt`
+- 评测结果：`artifacts/latest/runs/`
+- 校验脚本：`python scripts/sync_artifacts.py`
+
+如果 `artifacts/` 下的文件只有约 130 字节，说明拿到的是 LFS 指针，执行：
+
+```bash
+git lfs pull
+```
 
 当前 `Train.py` 仍在：
 
@@ -81,7 +106,7 @@ ultralytics-8.3.163/ultralytics-8.3.163/Train.py
 ## 文档
 
 - [项目设计文档](docs/安全帽智检_项目文档_V0.1.docx)
-- [项目初期方案](docs/项目初期方案.md)（给指导老师的初期方案，简版；[Word 版](docs/项目初期方案.docx)）
+- [项目初期方案](docs/项目初期方案.md)（给指导老师的初期方案，简版；[Word 版](docs/安全帽智检项目初期方案.docx)）
 - [标签规则](docs/标签规则.md)（head / helmet 两类标注规范，v1.2）
 - [YOLO11 安全帽模型训练指南](docs/YOLO11安全帽模型训练指南.md)
 - [通用版训练指南](docs/YOLO11安全帽模型训练指南_通用版.md)

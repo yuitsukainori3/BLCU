@@ -6,18 +6,17 @@
 
 - 模型版本；
 - 对应代码 commit；
-- 数据集版本；
-- 实测指标；
-- 下载地址；
-- SHA256。
+- 类别；
+- 来源 run；
+- 指标入口；
+- SHA256；
+- `artifacts/` 路径。
 
-当前为空模板：
+当前已登记 `v0.1.0`：
 
-```json
-{
-  "latest": null,
-  "models": {}
-}
-```
+- 权重：`artifacts/weights/helmet_v0.1.0.pt`
+- 评测结果：`artifacts/latest/runs/`
+- 类别：`head` / `helmet`
+- 校验：`python scripts/sync_artifacts.py`
 
-训练出第一个可用模型后，再填写真实版本和实测指标；不要提前编造。
+指标不在此文件重复编造，统一看 `artifacts/latest/runs` 和 `docs/实验记录.md`。
