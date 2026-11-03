@@ -18,6 +18,10 @@ os.environ.setdefault("YOLO_CONFIG_DIR", str(ROOT / ".ultralytics"))
 from ultralytics import YOLO
 
 DEFAULT_HELMET = ROOT / "artifacts" / "weights" / "helmet_v0.1.0.pt"
+local_demo_models = sorted((ROOT / "runs" / "train").glob("local_70_30*/weights/best.pt"), key=lambda p: p.stat().st_mtime)
+LOCAL_DEMO_MODEL = local_demo_models[-1] if local_demo_models else None
+if LOCAL_DEMO_MODEL and not model_path_or_pointer(DEFAULT_HELMET)[0]:
+    DEFAULT_HELMET = LOCAL_DEMO_MODEL
 
 st.set_page_config(page_title="筑安慧眼 | 施工安全监测", page_icon="🦺", layout="wide")
 st.markdown("""
@@ -35,8 +39,10 @@ st.markdown('<div class="hero"><h1>筑安慧眼 · 施工安全智能监测</h1>
 
 with st.sidebar:
     st.header("任务配置")
-    weight_file = st.text_input("安全帽检测模型", str(DEFAULT_HELMET))
-    person_weight = st.text_input("人员跟踪模型（COCO）", "yolo11s.pt")
+    model_title = "小样本本机演示模型（70/30）" if DEFAULT_HELMET == LOCAL_DEMO_MODEL else "GitHub SHWD v0.1.0 / 自定义模型"
+    weight_file = st.text_input(model_title, str(DEFAULT_HELMET))
+    selected_local_demo = LOCAL_DEMO_MODEL is not None and Path(weight_file).resolve() == LOCAL_DEMO_MODEL.resolve()
+    person_weight = st.text_input("人员跟踪模型（COCO）", "yolo11n.pt")
     conf_head = st.slider("裸头阈值", .05, .8, .18, .01)
     conf_helmet = st.slider("安全帽阈值", .05, .8, .30, .01)
     frame_stride = st.slider("抽帧间隔", 1, 12, 2)
@@ -155,6 +161,11 @@ with tab_experiment:
     col3.metric("960 单张推理", "18.2 ms")
     st.caption("640 基线为 mAP50 0.8207、违规召回 58.9%、推理 5.3 ms；上述均为 GitHub 记录中的实测值，不是本次运行数据。")
     st.markdown("**本版本的可复现改进策略**：960 高分辨率保留小头部细节；head / helmet 分别设置信心阈值；ByteTrack 绑定人员轨迹；滑动窗口投票压制单帧误报；事件按区域计数形成风险优先级。")
-    st.warning("当前 GitHub checkout 不包含训练数据；安全帽模型文件目前是 133 字节的 Git LFS 指针。未下载到真实权重前，不能报告新训练提升，也无法运行模型推理。")
+    if selected_local_demo:
+        st.warning("本机已生成 70 张训练图 / 30 张验证图的小样本演示模型，仅用于验证系统流程。它不是 SHWD 正式实验结果，head 验证样本很少，不能据此宣称达到项目指标。")
+    elif Path(weight_file).resolve() == (ROOT / "artifacts/weights/helmet_v0.1.0.pt").resolve():
+        st.success("当前选择 GitHub 共享模型 v0.1.0（SHWD 两类基线）；SHA256 已通过清单校验。")
+    else:
+        st.warning("当前路径为自定义模型，请确认它是完整有效的 head/helmet 两类 YOLO11 权重。")
 
 st.caption("筑安慧眼为安全管理辅助工具。画面遮挡、远距离小目标和复杂光照仍需人工复核；不要将单次模型输出作为处罚依据。")

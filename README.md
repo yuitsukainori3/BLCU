@@ -2,7 +2,7 @@
 
 基于 YOLO11 的工地安全帽佩戴检测系统。仓库用于同步项目代码、模型版本、应用框架和文档。
 
-> 当前状态：方案/原型阶段。应用框架尚未选型，`backend/`、`frontend/`、`ml/`、`configs/` 等目录先预留位置；Ultralytics 源码暂时保留在 `ultralytics-8.3.163/ultralytics-8.3.163/`，后续再决定是否改为 PyPI 依赖或 `vendor/`。
+> 当前状态：YOLO11 训练、评测路线已建立；本地视频展示原型和时序/分区风险逻辑已实现。当前没有实时摄像头 API、持久化数据库或消息推送。
 
 ## 目录结构
 
@@ -11,10 +11,10 @@ BLCU/
 ├─ README.md
 ├─ AGENTS.md
 ├─ .gitignore
-├─ backend/              # 预留：后端 API / 推理服务
-├─ frontend/             # 预留：可视化界面
-├─ ml/                   # 预留：训练、评估、推理、跟踪、业务规则
-├─ configs/              # 预留：数据/模型/阈值配置
+├─ backend/              # 后续 API 服务
+├─ frontend/             # Streamlit 本地演示入口 app.py
+├─ ml/                   # 视频检测、跟踪关联、事件聚合与风险计算
+├─ configs/              # 数据/模型/阈值配置
 ├─ docs/                 # 项目文档、训练指南、数据分析
 ├─ models/               # 模型登记表（不放权重）
 ├─ artifacts/            # 共享评测产物和模型（Git LFS）
@@ -59,13 +59,13 @@ Linux / macOS：
 source .venv/bin/activate
 ```
 
-先按自己的显卡安装 PyTorch（CUDA/CPU/MPS 以 [PyTorch 官网](https://pytorch.org/get-started/locally/) 为准），再安装 Ultralytics 源码：
+先按自己的显卡安装 PyTorch（CUDA/CPU/MPS 以 [PyTorch 官网](https://pytorch.org/get-started/locally/) 为准），再安装项目依赖：
 
 ```bash
-pip install -e ultralytics-8.3.163/ultralytics-8.3.163
+python -m pip install -r requirements.txt
 ```
 
-验证：
+应用和训练脚本会优先从仓库内 `ultralytics-8.3.163/ultralytics-8.3.163/` 加载固定版本。
 
 ```bash
 python -c "import ultralytics; print(ultralytics.__file__)"
@@ -98,8 +98,6 @@ python scripts/train_improved.py --data runs/data/head_repeated/helmet_head_repe
 
 每项训练改动需与当前基线在相同验证/测试划分、相同阈值口径下对比；重复采样可能过拟合，不能预设它一定提升。
 
-后端、前端和 `ml/` 的依赖等框架确定后再补；目前不要假设已经能启动完整应用。
-
 ## 数据和权重
 
 数据集和原始训练输出**不进 Git**：
@@ -121,14 +119,6 @@ python scripts/train_improved.py --data runs/data/head_repeated/helmet_head_repe
 git lfs pull
 ```
 
-当前 `Train.py` 仍在：
-
-```text
-ultralytics-8.3.163/ultralytics-8.3.163/Train.py
-```
-
-它默认读取同目录的 `data.yaml`。正式应用框架确定后，训练脚本建议迁到 `ml/train.py`，不要在第三方源码里长期堆业务代码。
-
 ## 文档
 
 - [项目设计文档](docs/安全帽智检_项目文档_V0.1.docx)
@@ -137,6 +127,8 @@ ultralytics-8.3.163/ultralytics-8.3.163/Train.py
 - [YOLO11 安全帽模型训练指南](docs/YOLO11安全帽模型训练指南.md)
 - [通用版训练指南](docs/YOLO11安全帽模型训练指南_通用版.md)
 - [两路检测方案](docs/两路检测方案.md)（COCO 人体 + 自训头部）
+- [展示系统使用说明](docs/展示系统使用说明.md)
+- [本地小样本试跑记录](docs/本地小样本试跑记录.md)（仅流程验证，不是 SHWD 新指标）
 - [获奖作品选题分析](docs/人工智能应用方向获奖分析与选题建议.md)
 - [筛选说明](docs/筛选说明.md)
 
