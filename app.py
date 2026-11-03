@@ -47,8 +47,8 @@ with st.sidebar:
     person_weight = st.text_input("人员跟踪模型（COCO）", "yolo11n.pt")
     conf_head = st.slider("裸头阈值", .05, .8, .18, .01)
     conf_helmet = st.slider("安全帽阈值", .05, .8, .30, .01)
-    frame_stride = st.slider("抽帧间隔", 1, 12, 12,
-                             help="每隔 N 帧进行一次模型推理。设为 12 可显著缩短长视频分析时间。")
+    frame_stride = st.slider("抽帧间隔", 1, 30, 30,
+                             help="每隔 N 帧进行一次模型推理。设为 30 可显著缩短长视频分析时间。")
     region_names = st.text_input("监测区域（逗号分隔）", "东侧作业区,西侧作业区,材料区")
     vote_n = st.slider("连续观察帧数", 3, 30, 10)
     vote_ratio = st.slider("违规帧比例门槛", .3, 1.0, .6, .05)
