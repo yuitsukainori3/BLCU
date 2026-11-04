@@ -38,13 +38,55 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageFilter
 
-DATA_DEFAULT = Path(r"F:\Competition\ultralytics-8.3.163\ultralytics-8.3.163\ultralytics\cfg\datasets\SHWD.yaml")
-OUT_DEFAULT = Path(r"F:\Competition\datasets\head_cls")
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+from _ui import die, echo_config, progress  # noqa: E402
+
+# ==================== 可调参数（只改这里） ====================
+DATA_YAML = (ROOT / "ultralytics-8.3.163" / "ultralytics-8.3.163"
+             / "ultralytics" / "cfg" / "datasets" / "SHWD.yaml")  # 原始 SHWD 划分
+OUT_DIR = ROOT / "datasets" / "head_cls"   # 裁片输出（Ultralytics 分类目录结构）
+PAD = 1.3             # GT 框外扩倍数（1.3 = 四周各留 15%）
+JITTER = 0.1          # 训练裁片随机平移/缩放比例，模拟预测框偏差
+CROP_SIZE = 224       # 裁片统一边长
+MIN_PX = 10.0         # GT 框短边小于该值不裁（放大也是糊）
+HEAD_REPEAT = 2       # head 类过采样倍数（只作用于 train，缓解 1:6.6 不平衡）
+DEGRADE_PROB = 0.0    # 训练裁片随机降质概率，0 = 不做
+BLUR_MAX = 2.0        # 高斯模糊半径上限
+DET_IMGSZ = 960       # --from-pred 时检测器的输入尺寸
+DET_CONF = 0.25       # --from-pred 时预测框的最低置信度
+MATCH_IOU = 0.5       # 预测框与 GT 匹配的 IoU 下限
+QUALITY = 90          # JPEG 质量
+PREVIEW = 8           # 拼一张预览图，0 = 不生成
+SEED = 0
+DEVICE = "0"
+# ============================================================
 
 
-def die(msg: str, code: int = 1):
-    print(f"[错误] {msg}", file=sys.stderr, flush=True)
-    raise SystemExit(code)
+def parse_args(argv=None):
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--data", type=Path, default=DATA_YAML)
+    p.add_argument("--out", type=Path, default=OUT_DIR)
+    p.add_argument("--pad", type=float, default=PAD, help="GT 框外扩倍数（1.3 = 四周各留 15%%）")
+    p.add_argument("--jitter", type=float, default=JITTER, help="训练裁片随机平移/缩放比例")
+    p.add_argument("--imgsz", type=int, default=CROP_SIZE)
+    p.add_argument("--min-px", type=float, default=MIN_PX, help="GT 框短边小于该值不裁")
+    p.add_argument("--head-repeat", type=int, default=HEAD_REPEAT, help="head 类过采样倍数（只作用于 train）")
+    p.add_argument("--degrade-prob", type=float, default=DEGRADE_PROB,
+                   help="训练裁片随机降质的概率（模糊/降采样），0 = 不做")
+    p.add_argument("--blur-max", type=float, default=BLUR_MAX, help="高斯模糊半径上限")
+    p.add_argument("--from-pred", action="store_true",
+                   help="用检测器的预测框裁片（只取与 GT IoU≥--match-iou 的），让训练分布对齐推理")
+    p.add_argument("--det", type=Path, default=None, help="--from-pred 时使用的检测权重")
+    p.add_argument("--det-imgsz", type=int, default=DET_IMGSZ)
+    p.add_argument("--det-conf", type=float, default=DET_CONF, help="预测框的最低置信度")
+    p.add_argument("--match-iou", type=float, default=MATCH_IOU, help="预测框与 GT 匹配的 IoU 下限")
+    p.add_argument("--quality", type=int, default=QUALITY, help="JPEG 质量")
+    p.add_argument("--preview", type=int, default=PREVIEW, help="拼一张预览图，0 = 不生成")
+    p.add_argument("--seed", type=int, default=SEED)
+    p.add_argument("--device", default=DEVICE)
+    p.add_argument("--dry-run", action="store_true")
+    return p.parse_args(argv)
 
 
 def read_yaml(path: Path) -> dict:
@@ -69,32 +111,6 @@ def class_names(cfg: dict) -> dict[int, str]:
         items = [x.strip().strip("'\"") for x in names.strip().strip("[]").split(",") if x.strip()]
         return {i: n for i, n in enumerate(items)}
     return {int(k): v for k, v in names.items()}
-
-
-def parse_args(argv=None):
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--data", type=Path, default=DATA_DEFAULT)
-    p.add_argument("--out", type=Path, default=OUT_DEFAULT)
-    p.add_argument("--pad", type=float, default=1.3, help="GT 框外扩倍数（1.3 = 四周各留 15%%)")
-    p.add_argument("--jitter", type=float, default=0.1, help="训练裁片随机平移/缩放比例")
-    p.add_argument("--imgsz", type=int, default=224)
-    p.add_argument("--min-px", type=float, default=10.0, help="GT 框短边小于该值不裁")
-    p.add_argument("--head-repeat", type=int, default=2, help="head 类过采样倍数（只作用于 train）")
-    p.add_argument("--degrade-prob", type=float, default=0.0,
-                   help="训练裁片随机降质的概率（模糊/降采样），0 = 不做")
-    p.add_argument("--blur-max", type=float, default=2.0, help="高斯模糊半径上限")
-    p.add_argument("--from-pred", action="store_true",
-                   help="用检测器的预测框裁片（只取与 GT IoU≥--match-iou 的），让训练分布对齐推理")
-    p.add_argument("--det", type=Path, default=None, help="--from-pred 时使用的检测权重")
-    p.add_argument("--det-imgsz", type=int, default=960)
-    p.add_argument("--det-conf", type=float, default=0.25, help="预测框的最低置信度")
-    p.add_argument("--match-iou", type=float, default=0.5, help="预测框与 GT 匹配的 IoU 下限")
-    p.add_argument("--quality", type=int, default=90, help="JPEG 质量")
-    p.add_argument("--preview", type=int, default=8, help="拼一张预览图，0 = 不生成")
-    p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--device", default="0")
-    p.add_argument("--dry-run", action="store_true")
-    return p.parse_args(argv)
 
 
 def degrade(im: Image.Image, rng: random.Random, prob: float, blur_max: float, size: int) -> Image.Image:
@@ -139,6 +155,17 @@ def main(argv=None) -> int:
     names = class_names(cfg)
     root = Path(cfg["path"])
 
+    echo_config("头部裁片配置", [
+        ("数据", data),
+        ("图片根", root),
+        ("输出", args.out.expanduser().resolve()),
+        ("裁片", f"{args.imgsz}px    pad {args.pad}    jitter {args.jitter}    min_px {args.min_px}"),
+        ("过采样", f"head ×{args.head_repeat}（仅 train）    降质概率 {args.degrade_prob}"),
+        ("框来源", f"预测框（imgsz {args.det_imgsz}, conf {args.det_conf}, IoU≥{args.match_iou}）"
+                   if args.from_pred else "GT 框"),
+        ("随机种子", args.seed),
+    ])
+
     rng = random.Random(args.seed)
     preview_buf: list[tuple[Image.Image, str]] = []
     stat = {split: {n: 0 for n in names.values()} for split in ("train", "val")}
@@ -169,9 +196,9 @@ def main(argv=None) -> int:
             for d in out_dirs.values():
                 d.mkdir(parents=True, exist_ok=True)
 
-        for img_path in sorted(img_dir.iterdir()):
-            if img_path.suffix.lower() not in {".jpg", ".jpeg", ".png"}:
-                continue
+        imgs = [p for p in sorted(img_dir.iterdir()) if p.suffix.lower() in {".jpg", ".jpeg", ".png"}]
+        bar = progress(imgs, desc=f"裁片 {split}", unit="img")
+        for img_path in bar:
             lbl_path = lbl_dir / f"{img_path.stem}.txt"
             if not lbl_path.is_file():
                 skipped["empty"] += 1
@@ -231,6 +258,7 @@ def main(argv=None) -> int:
                         crop.save(out_dirs[names[cid]] / name, quality=args.quality)
                     if args.preview and len(preview_buf) < args.preview:
                         preview_buf.append((crop.copy(), names[cid]))
+            bar.set_postfix(crops=sum(stat[split].values()))
 
     print(f"裁片统计（pad={args.pad}, jitter={args.jitter}, min_px={args.min_px}, head_repeat={args.head_repeat}）")
     for split, d in stat.items():

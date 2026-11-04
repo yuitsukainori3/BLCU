@@ -27,26 +27,36 @@ from pathlib import Path
 
 import numpy as np
 
-DATA_DEFAULT = Path(r"F:\Competition\ultralytics-8.3.163\ultralytics-8.3.163\ultralytics\cfg\datasets\SHWD.yaml")
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+from _ui import die, echo_config, progress  # noqa: E402
 
-
-def die(msg: str, code: int = 1):
-    print(f"[错误] {msg}", file=sys.stderr, flush=True)
-    raise SystemExit(code)
+# ==================== 可调参数（只改这里） ====================
+DATA_YAML = (ROOT / "ultralytics-8.3.163" / "ultralytics-8.3.163"
+             / "ultralytics" / "cfg" / "datasets" / "SHWD.yaml")  # 原始 SHWD 划分
+SPLIT = "val"          # 中间分析一律 val
+IMGSZ = 960            # 基线 960！640 的结果与 docs/评测记录.md 不可比
+CONF = 0.25            # 工作点阈值（与评测口径一致）
+IOU = 0.45             # 匹配用的 IoU 阈值
+LOW_CONF = 0.05        # 低置信探测的下限
+DEVICE = "0"
+OUT_DIR = ROOT / "runs" / "error_analysis"
+SAVE_CROPS = 0         # 为前 N 个 E 类样本保存裁剪图
+# ============================================================
 
 
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--weights", type=Path, required=True)
-    p.add_argument("--data", type=Path, default=DATA_DEFAULT)
-    p.add_argument("--split", default="val", choices=("train", "val", "test"))
-    p.add_argument("--imgsz", type=int, default=640)
-    p.add_argument("--conf", type=float, default=0.25, help="工作点阈值（与评测口径一致）")
-    p.add_argument("--iou", type=float, default=0.45, help="匹配用的 IoU 阈值")
-    p.add_argument("--low-conf", type=float, default=0.05, help="低置信探测的下限")
-    p.add_argument("--device", default="0")
-    p.add_argument("--out", type=Path, default=Path(r"F:\Competition\runs\error_analysis"))
-    p.add_argument("--save-crops", type=int, default=0, help="为前 N 个 E 类样本保存裁剪图")
+    p.add_argument("--data", type=Path, default=DATA_YAML)
+    p.add_argument("--split", default=SPLIT, choices=("train", "val", "test"))
+    p.add_argument("--imgsz", type=int, default=IMGSZ, help=f"输入尺寸（默认 {IMGSZ} = 基线）")
+    p.add_argument("--conf", type=float, default=CONF, help="工作点阈值（与评测口径一致）")
+    p.add_argument("--iou", type=float, default=IOU, help="匹配用的 IoU 阈值")
+    p.add_argument("--low-conf", type=float, default=LOW_CONF, help="低置信探测的下限")
+    p.add_argument("--device", default=DEVICE)
+    p.add_argument("--out", type=Path, default=OUT_DIR)
+    p.add_argument("--save-crops", type=int, default=SAVE_CROPS, help="为前 N 个 E 类样本保存裁剪图")
     return p.parse_args(argv)
 
 
@@ -116,15 +126,24 @@ def main(argv=None) -> int:
     if not img_files:
         die(f"{img_dir} 下没有图片")
 
+    echo_config("错误分解配置", [
+        ("权重", weights),
+        ("图片", f"{img_dir}（{len(img_files)} 张）"),
+        ("划分", f"{args.split}    imgsz {args.imgsz}"),
+        ("工作点", f"conf {args.conf} / IoU {args.iou}（低置信下限 {args.low_conf}）"),
+        ("输出", args.out.expanduser().resolve()),
+    ])
+
     from PIL import Image
     from ultralytics import YOLO
 
     model = YOLO(str(weights))
 
     records = []
+    bar = progress(img_files, desc=f"分解 {args.split}", unit="img")
     # 逐张推理：一次 predict 整批会把 282 张的中间结果都留在显存里，
     # 960 输入下 8 GB 卡必然 OOM（实测在 conv 前向就炸）。逐张跑最稳。
-    for img_path in img_files:
+    for img_path in bar:
         res = model.predict(str(img_path), imgsz=args.imgsz, conf=args.low_conf,
                             iou=0.7, max_det=300, device=args.device, verbose=False)[0]
         h, w = res.orig_shape
@@ -134,6 +153,7 @@ def main(argv=None) -> int:
         gray = np.asarray(Image.open(img_path).convert("L"), dtype=float)
         bright = float(gray.mean())
         contrast = float(gray.std())
+        bar.set_postfix(gt=len(records) + len(gt))
 
         for g in gt:
             gcls, gbox = int(g[0]), g[1:5]

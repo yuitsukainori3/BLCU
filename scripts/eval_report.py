@@ -21,6 +21,8 @@ python scripts/eval_report.py --weights ... --split val --no-slices     # 只要
 它内部调用 error_analysis.py 做逐框匹配，结果落在 runs/eval/_slices/<split>/boxes_<split>.csv。
 
 退出码：0 成功；1 参数错误或评测失败。
+
+默认 imgsz 960、split val（与 docs/评测记录.md 的基线一致）；要跑 640 必须显式传 `--imgsz 640`。
 """
 
 from __future__ import annotations
@@ -32,23 +34,31 @@ import subprocess
 import sys
 from pathlib import Path
 
-DEFAULT_DATA = Path(r"F:\Competition\ultralytics-8.3.163\ultralytics-8.3.163\ultralytics\cfg\datasets\SHWD.yaml")
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+from _ui import die, echo_config  # noqa: E402
 
-
-def die(msg: str, code: int = 1):
-    print(f"[错误] {msg}", file=sys.stderr, flush=True)
-    raise SystemExit(code)
+# ==================== 可调参数（只改这里） ====================
+DATA_YAML = (ROOT / "ultralytics-8.3.163" / "ultralytics-8.3.163"
+             / "ultralytics" / "cfg" / "datasets" / "SHWD.yaml")  # 原始 SHWD 划分
+SPLIT = "val"        # 中间对比一律 val；test 只在最终版本跑一次
+IMGSZ = 960          # 基线 960！640 的结果与 docs/评测记录.md 不可比
+BATCH = 8            # 8 GB 卡 960 输入下的稳妥值
+WORKERS = 0          # Windows 下保持 0，多进程读图容易卡住
+DEVICE = "0"
+EVAL_DIR = ROOT / "runs" / "eval"   # val 的 plots 与结果落这里
+# ============================================================
 
 
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--weights", type=Path, required=True, help="权重路径，如 runs/detect/train4/weights/best.pt")
-    p.add_argument("--data", type=Path, default=DEFAULT_DATA, help="data.yaml")
-    p.add_argument("--split", default="val", choices=("val", "test"), help="评测哪个划分")
-    p.add_argument("--imgsz", type=int, default=640)
-    p.add_argument("--batch", type=int, default=8)
-    p.add_argument("--workers", type=int, default=0, help="Windows 下建议 0，避免多进程读图卡住")
-    p.add_argument("--device", default="0")
+    p.add_argument("--data", type=Path, default=DATA_YAML, help="data.yaml（默认原始 SHWD 划分）")
+    p.add_argument("--split", default=SPLIT, choices=("val", "test"), help="评测哪个划分")
+    p.add_argument("--imgsz", type=int, default=IMGSZ, help=f"输入尺寸（默认 {IMGSZ} = 基线）")
+    p.add_argument("--batch", type=int, default=BATCH)
+    p.add_argument("--workers", type=int, default=WORKERS, help="Windows 下建议 0，避免多进程读图卡住")
+    p.add_argument("--device", default=DEVICE)
     p.add_argument("--append", type=Path, default=None, help="把一行结果追加到这张 markdown 表里")
     p.add_argument("--out", type=Path, default=None, help="把完整报告写到这个文件")
     p.add_argument("--no-slices", action="store_true", help="跳过分层评测（按尺寸/亮度/拥挤度）")
@@ -59,7 +69,7 @@ def parse_args(argv=None):
 
 def _run_error_analysis(weights: Path, data: Path, split: str, imgsz: int, device: str) -> Path:
     """调 error_analysis.py 生成逐框 CSV（复用它的匹配逻辑，避免两套实现漂移）。"""
-    out_dir = Path(__file__).resolve().parent.parent / "runs" / "eval" / "_slices" / split
+    out_dir = ROOT / "runs" / "eval" / "_slices" / split
     out_dir.mkdir(parents=True, exist_ok=True)
     script = Path(__file__).with_name("error_analysis.py")
     cmd = [sys.executable, str(script), "--weights", str(weights), "--data", str(data),
@@ -118,6 +128,15 @@ def main(argv=None) -> int:
     if not Path(args.data).expanduser().is_file():
         die(f"data.yaml 不存在：{args.data}")
 
+    if not args.quiet:
+        echo_config("评测配置", [
+            ("权重", weights),
+            ("数据", Path(args.data).expanduser().resolve()),
+            ("划分", f"{args.split}    imgsz {args.imgsz}    batch {args.batch}"),
+            ("设备", f"cuda:{args.device}    workers {args.workers}"),
+            ("产物", EVAL_DIR / f"{weights.parent.parent.name}_{args.split}"),
+        ])
+
     from ultralytics import YOLO
 
     # 先跑分层评测（独立子进程，自带一次推理），再在本进程做 val。
@@ -135,7 +154,7 @@ def main(argv=None) -> int:
     r = model.val(
         data=str(args.data), split=args.split, imgsz=args.imgsz, batch=args.batch,
         workers=args.workers, device=args.device, plots=True, verbose=False,
-        project=r"F:\Competition\runs\eval", name=f"{weights.parent.parent.name}_{args.split}",
+        project=str(EVAL_DIR), name=f"{weights.parent.parent.name}_{args.split}",
         exist_ok=True,
     )
 

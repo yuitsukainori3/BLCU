@@ -22,28 +22,37 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-ROI_DEFAULT = ROOT / "configs" / "roi.json"
+sys.path.insert(0, str(ROOT / "scripts"))
+from _ui import die, echo_config, progress  # noqa: E402
 
-
-def die(msg: str):
-    print(f"[错误] {msg}", file=sys.stderr)
-    raise SystemExit(1)
+# ==================== 可调参数（只改这里） ====================
+ROI_JSON = ROOT / "configs" / "roi.json"                  # 回归 ROI（只增不减）
+OUT_DIR = ROOT / "datasets" / "negatives" / "hands"       # 贴片输出
+CONF = 0.18           # 与展示系统一致的 head 阈值（负样本就在这个工作点上挖）
+RAW_CONF = 0.05       # 推理时的原始阈值，必须低于 CONF
+IMGSZ = 960
+DEVICE = "0"
+PAD = 1.5             # 裁片外扩倍数（带一点上下文）
+PER_CLUSTER = 10      # 每个簇最多取几张
+MIN_GAP = 20          # 同一簇内两张贴片的最小帧间隔
+GRID = 40             # 聚簇网格边长（px）
+# ============================================================
 
 
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--weights", type=Path, required=True)
     p.add_argument("--video", type=Path, required=True)
-    p.add_argument("--out", type=Path, default=ROOT / "datasets" / "negatives" / "hands")
-    p.add_argument("--roi", type=Path, default=ROI_DEFAULT)
-    p.add_argument("--conf", type=float, default=0.18, help="与展示系统一致的 head 阈值")
-    p.add_argument("--raw-conf", type=float, default=0.05)
-    p.add_argument("--imgsz", type=int, default=960)
-    p.add_argument("--device", default="0")
-    p.add_argument("--pad", type=float, default=1.5, help="裁片外扩倍数（带一点上下文）")
-    p.add_argument("--per-cluster", type=int, default=10)
-    p.add_argument("--min-gap", type=int, default=20, help="同一簇内两张贴片的最小帧间隔")
-    p.add_argument("--grid", type=int, default=40)
+    p.add_argument("--out", type=Path, default=OUT_DIR)
+    p.add_argument("--roi", type=Path, default=ROI_JSON)
+    p.add_argument("--conf", type=float, default=CONF, help="与展示系统一致的 head 阈值")
+    p.add_argument("--raw-conf", type=float, default=RAW_CONF)
+    p.add_argument("--imgsz", type=int, default=IMGSZ)
+    p.add_argument("--device", default=DEVICE)
+    p.add_argument("--pad", type=float, default=PAD, help="裁片外扩倍数（带一点上下文）")
+    p.add_argument("--per-cluster", type=int, default=PER_CLUSTER)
+    p.add_argument("--min-gap", type=int, default=MIN_GAP, help="同一簇内两张贴片的最小帧间隔")
+    p.add_argument("--grid", type=int, default=GRID)
     return p.parse_args(argv)
 
 
@@ -69,27 +78,41 @@ def main(argv=None) -> int:
         die("打不开视频")
     W = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     H = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or None
     sx, sy = W / base_w, H / base_h
     rois = [(r["x1"] * sx, r["y1"] * sy, r["x2"] * sx, r["y2"] * sy) for r in cfg.get("rois", [])]
 
+    echo_config("难例挖掘配置", [
+        ("权重", args.weights.expanduser().resolve()),
+        ("视频", f"{args.video.expanduser().resolve()}  {W}x{H}  {total_frames or '?'} 帧"),
+        ("ROI", f"{args.roi}（{len(rois)} 个）"),
+        ("阈值", f"conf {args.conf}（原始 {args.raw_conf}）    imgsz {args.imgsz}"),
+        ("聚簇", f"网格 {args.grid}px    每簇 ≤{args.per_cluster} 张    最小间隔 {args.min_gap} 帧"),
+        ("输出", args.out.expanduser().resolve()),
+    ])
+
     cands = []  # (frame, conf, x1,y1,x2,y2)
     idx = 0
-    while True:
-        ok, frame = cap.read()
-        if not ok:
-            break
-        res = model.predict(frame, imgsz=args.imgsz, conf=args.raw_conf, device=args.device, verbose=False)[0]
-        for b, c, cf in zip(res.boxes.xyxy.cpu().numpy(), res.boxes.cls.cpu().numpy().astype(int),
-                            res.boxes.conf.cpu().numpy()):
-            if int(c) != 0 or float(cf) < args.conf:
-                continue
-            x1, y1, x2, y2 = (float(v) for v in b)
-            if (x2 - x1) > max_w:
-                continue
-            cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
-            if any(r[0] <= cx <= r[2] and r[1] <= cy <= r[3] for r in rois):
-                cands.append((idx, float(cf), x1, y1, x2, y2))
-        idx += 1
+    bar = progress(total=total_frames, desc="扫描命中", unit="frame")
+    with bar:
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            res = model.predict(frame, imgsz=args.imgsz, conf=args.raw_conf, device=args.device, verbose=False)[0]
+            for b, c, cf in zip(res.boxes.xyxy.cpu().numpy(), res.boxes.cls.cpu().numpy().astype(int),
+                                res.boxes.conf.cpu().numpy()):
+                if int(c) != 0 or float(cf) < args.conf:
+                    continue
+                x1, y1, x2, y2 = (float(v) for v in b)
+                if (x2 - x1) > max_w:
+                    continue
+                cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+                if any(r[0] <= cx <= r[2] and r[1] <= cy <= r[3] for r in rois):
+                    cands.append((idx, float(cf), x1, y1, x2, y2))
+            idx += 1
+            bar.update(1)
+            bar.set_postfix(hits=len(cands))
     cap.release()
 
     # 聚簇：按 40px 网格
@@ -126,21 +149,25 @@ def main(argv=None) -> int:
     want = {p[0]: p for p in picked}
     idx = 0
     saved = 0
-    while True:
-        ok, frame = cap.read()
-        if not ok:
-            break
-        if idx in want:
-            frame_id, cf, (x1, y1, x2, y2) = want[idx]
-            crop = frame[y1:y2, x1:x2]
-            if crop.size:
-                name = f"{args.video.stem}_f{frame_id:04d}.png"
-                cv2.imwrite(str(out_dir / name), crop)
-                meta.append({"file": name, "video": args.video.name, "frame": frame_id,
-                             "conf": round(cf, 3), "box": [x1, y1, x2, y2],
-                             "size": [x2 - x1, y2 - y1]})
-                saved += 1
-        idx += 1
+    bar = progress(total=total_frames, desc="裁图", unit="frame")
+    with bar:
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            if idx in want:
+                frame_id, cf, (x1, y1, x2, y2) = want[idx]
+                crop = frame[y1:y2, x1:x2]
+                if crop.size:
+                    name = f"{args.video.stem}_f{frame_id:04d}.png"
+                    cv2.imwrite(str(out_dir / name), crop)
+                    meta.append({"file": name, "video": args.video.name, "frame": frame_id,
+                                 "conf": round(cf, 3), "box": [x1, y1, x2, y2],
+                                 "size": [x2 - x1, y2 - y1]})
+                    saved += 1
+            idx += 1
+            bar.update(1)
+            bar.set_postfix(saved=saved)
     cap.release()
 
     (out_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")

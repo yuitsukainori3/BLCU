@@ -29,12 +29,33 @@ import numpy as np
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parent.parent
-DATA_DEFAULT = ROOT / "ultralytics-8.3.163" / "ultralytics-8.3.163" / "ultralytics" / "cfg" / "datasets" / "SHWD.yaml"
+sys.path.insert(0, str(ROOT / "scripts"))
+from _ui import die, echo_config, progress  # noqa: E402
+
+# ==================== 可调参数（只改这里） ====================
+DATA_YAML = (ROOT / "ultralytics-8.3.163" / "ultralytics-8.3.163"
+             / "ultralytics" / "cfg" / "datasets" / "SHWD.yaml")  # 原始 SHWD 划分
+PATCHES_DIR = ROOT / "datasets" / "negatives" / "hands"   # mine_hard_negatives.py 挖出的贴片
+OUT_DIR = ROOT / "datasets" / "shwd_neg"                   # 负样本增强后的训练集
+N_IMAGES = 300        # 贴片增强的训练图数量（neg_v1 用的就是 300）
+PER_IMAGE = (1, 3)    # 每张图贴 1—3 个贴片
+PATCH_SIZE = (14, 30)  # 贴片边长范围（px），对齐推理时的手部框尺寸
+SEED = 0
+# ============================================================
 
 
-def die(msg: str):
-    print(f"[错误] {msg}", file=sys.stderr)
-    raise SystemExit(1)
+def parse_args(argv=None):
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--data", type=Path, default=DATA_YAML, help="原 SHWD yaml")
+    p.add_argument("--patches", type=Path, default=PATCHES_DIR)
+    p.add_argument("--out", type=Path, default=OUT_DIR)
+    p.add_argument("--n-images", type=int, default=N_IMAGES, help="贴片增强的训练图数量")
+    p.add_argument("--per-image", type=int, nargs=2, default=list(PER_IMAGE), metavar=("MIN", "MAX"))
+    p.add_argument("--size", type=int, nargs=2, default=list(PATCH_SIZE), metavar=("MIN", "MAX"),
+                   help="贴片边长范围")
+    p.add_argument("--seed", type=int, default=SEED)
+    p.add_argument("--dry-run", action="store_true")
+    return p.parse_args(argv)
 
 
 def read_yaml(path: Path) -> dict:
@@ -95,19 +116,6 @@ def overlaps(box, boxes, margin=4.0) -> bool:
     return False
 
 
-def parse_args(argv=None):
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--data", type=Path, default=DATA_DEFAULT, help="原 SHWD yaml")
-    p.add_argument("--patches", type=Path, default=ROOT / "datasets" / "negatives" / "hands")
-    p.add_argument("--out", type=Path, default=ROOT / "datasets" / "shwd_neg")
-    p.add_argument("--n-images", type=int, default=300, help="贴片增强的训练图数量")
-    p.add_argument("--per-image", type=int, nargs=2, default=[1, 3], metavar=("MIN", "MAX"))
-    p.add_argument("--size", type=int, nargs=2, default=[14, 30], metavar=("MIN", "MAX"), help="贴片边长范围")
-    p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--dry-run", action="store_true")
-    return p.parse_args(argv)
-
-
 def main(argv=None) -> int:
     args = parse_args(argv)
     data = args.data.expanduser().resolve()
@@ -124,6 +132,14 @@ def main(argv=None) -> int:
     rng = random.Random(args.seed)
     out = args.out.expanduser().resolve()
 
+    echo_config("负样本增强配置", [
+        ("数据", data),
+        ("贴片", f"{patches_dir}（{len(patch_files)} 张）"),
+        ("输出", out),
+        ("增强图数", f"{args.n_images}    每图 {args.per_image[0]}—{args.per_image[1]} 个"),
+        ("贴片边长", f"{args.size[0]}—{args.size[1]} px    随机种子 {args.seed}"),
+    ])
+
     splits = {"train": cfg.get("train", "images/train"), "val": cfg.get("val", "images/val"),
               "test": cfg.get("test", "images/test")}
     stats = {"links": 0, "aug": 0, "pasted": 0}
@@ -135,9 +151,8 @@ def main(argv=None) -> int:
             continue
         dst_img = out / "images" / split
         dst_lbl = out / "labels" / split
-        for ip in sorted(src_img.iterdir()):
-            if ip.suffix.lower() not in {".jpg", ".jpeg", ".png"}:
-                continue
+        imgs = [p for p in sorted(src_img.iterdir()) if p.suffix.lower() in {".jpg", ".jpeg", ".png"}]
+        for ip in progress(imgs, desc=f"链接 {split}", unit="img", leave=False):
             link_or_copy(ip, dst_img / ip.name)
             lp = src_root / "labels" / split / f"{ip.stem}.txt"
             if lp.is_file():
@@ -149,7 +164,8 @@ def main(argv=None) -> int:
     picked = rng.sample(train_files, min(args.n_images, len(train_files)))
     aug_meta: dict[str, list] = {}
 
-    for ip in picked:
+    bar = progress(picked, desc="贴片增强", unit="img")
+    for ip in bar:
         im = Image.open(ip).convert("RGB")
         arr = np.array(im)
         h, w = arr.shape[:2]
@@ -196,6 +212,7 @@ def main(argv=None) -> int:
         stats["aug"] += 1
         stats["pasted"] += pasted
         aug_meta[out_img.name] = boxes_pasted
+        bar.set_postfix(aug=stats["aug"], pasted=stats["pasted"])
 
     yaml_path = out / "SHWD_neg.yaml"
     if not args.dry_run:
