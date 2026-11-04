@@ -36,7 +36,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFilter
 
 DATA_DEFAULT = Path(r"F:\Competition\ultralytics-8.3.163\ultralytics-8.3.163\ultralytics\cfg\datasets\SHWD.yaml")
 OUT_DEFAULT = Path(r"F:\Competition\datasets\head_cls")
@@ -80,11 +80,31 @@ def parse_args(argv=None):
     p.add_argument("--imgsz", type=int, default=224)
     p.add_argument("--min-px", type=float, default=10.0, help="GT 框短边小于该值不裁")
     p.add_argument("--head-repeat", type=int, default=2, help="head 类过采样倍数（只作用于 train）")
+    p.add_argument("--degrade-prob", type=float, default=0.0,
+                   help="训练裁片随机降质的概率（模糊/降采样），0 = 不做")
+    p.add_argument("--blur-max", type=float, default=2.0, help="高斯模糊半径上限")
     p.add_argument("--quality", type=int, default=90, help="JPEG 质量")
     p.add_argument("--preview", type=int, default=8, help="拼一张预览图，0 = 不生成")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--dry-run", action="store_true")
     return p.parse_args(argv)
+
+
+def degrade(im: Image.Image, rng: random.Random, prob: float, blur_max: float, size: int) -> Image.Image:
+    """随机降质：模糊 / 降采样再放大 / 两者叠加。
+
+    为什么要做：head 裁片中位 35×44、helmet 80×98，缩放后清晰度天然不同，
+    模型很容易学到"越糊越像头盔"的捷径。对两类做同样的降质，逼它看内容而不是清晰度。
+    """
+    if rng.random() > prob:
+        return im
+    kind = rng.choice(("blur", "down", "both"))
+    if kind in ("blur", "both"):
+        im = im.filter(ImageFilter.GaussianBlur(rng.uniform(0.6, blur_max)))
+    if kind in ("down", "both"):
+        side = max(32, int(size * rng.uniform(0.35, 0.7)))
+        im = im.resize((side, side), Image.BILINEAR).resize((size, size), Image.BILINEAR)
+    return im
 
 
 def crop_box(box, pad: float, jitter: float, rng: random.Random, w: int, h: int):
@@ -159,6 +179,8 @@ def main(argv=None) -> int:
                         skipped["degenerate"] += 1
                         continue
                     crop = im.crop(cb).resize((args.imgsz, args.imgsz), Image.BILINEAR)
+                    if split == "train" and args.degrade_prob > 0:
+                        crop = degrade(crop, rng, args.degrade_prob, args.blur_max, args.imgsz)
                     name = f"{img_path.stem}_{i}" + (f"_r{r}" if r else "") + ".jpg"
                     stat[split][names[cid]] += 1
                     if not args.dry_run:
