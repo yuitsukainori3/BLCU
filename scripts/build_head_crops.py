@@ -83,9 +83,16 @@ def parse_args(argv=None):
     p.add_argument("--degrade-prob", type=float, default=0.0,
                    help="训练裁片随机降质的概率（模糊/降采样），0 = 不做")
     p.add_argument("--blur-max", type=float, default=2.0, help="高斯模糊半径上限")
+    p.add_argument("--from-pred", action="store_true",
+                   help="用检测器的预测框裁片（只取与 GT IoU≥--match-iou 的），让训练分布对齐推理")
+    p.add_argument("--det", type=Path, default=None, help="--from-pred 时使用的检测权重")
+    p.add_argument("--det-imgsz", type=int, default=960)
+    p.add_argument("--det-conf", type=float, default=0.25, help="预测框的最低置信度")
+    p.add_argument("--match-iou", type=float, default=0.5, help="预测框与 GT 匹配的 IoU 下限")
     p.add_argument("--quality", type=int, default=90, help="JPEG 质量")
     p.add_argument("--preview", type=int, default=8, help="拼一张预览图，0 = 不生成")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--device", default="0")
     p.add_argument("--dry-run", action="store_true")
     return p.parse_args(argv)
 
@@ -135,7 +142,21 @@ def main(argv=None) -> int:
     rng = random.Random(args.seed)
     preview_buf: list[tuple[Image.Image, str]] = []
     stat = {split: {n: 0 for n in names.values()} for split in ("train", "val")}
-    skipped = {"small": 0, "degenerate": 0, "empty": 0}
+    skipped = {"small": 0, "degenerate": 0, "empty": 0, "unmatched": 0}
+
+    det = None
+    if args.from_pred:
+        if not args.det or not Path(args.det).expanduser().is_file():
+            die("--from-pred 需要 --det 指向检测权重")
+        from ultralytics import YOLO
+        det = YOLO(str(Path(args.det).expanduser()))
+
+    def iou_one(a, b) -> float:
+        x1, y1 = max(a[0], b[0]), max(a[1], b[1])
+        x2, y2 = min(a[2], b[2]), min(a[3], b[3])
+        inter = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+        ua = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+        return inter / ua if ua > 0 else 0.0
 
     for split in ("train", "val"):
         img_dir = root / cfg.get(split, f"images/{split}")
@@ -162,12 +183,35 @@ def main(argv=None) -> int:
 
             im = Image.open(img_path).convert("RGB")
             w, h = im.size
-            for i, p in enumerate(lines):
-                if len(p) < 5:
-                    continue
-                cid = int(float(p[0]))
-                x, y, bw, bh = map(float, p[1:5])
-                box = ((x - bw / 2) * w, (y - bh / 2) * h, (x + bw / 2) * w, (y + bh / 2) * h)
+
+            # 组装 (类别, 框)：默认用 GT；--from-pred 时用“与 GT 对得上的预测框”，
+            # 让裁片分布和推理时一致（框会抖、会松）。
+            items: list[tuple[int, tuple]] = []
+            if det is None:
+                for p in lines:
+                    if len(p) < 5:
+                        continue
+                    cid = int(float(p[0]))
+                    x, y, bw, bh = map(float, p[1:5])
+                    items.append((cid, ((x - bw / 2) * w, (y - bh / 2) * h, (x + bw / 2) * w, (y + bh / 2) * h)))
+            else:
+                gts = [(int(float(p[0])), ((float(p[1]) - float(p[3]) / 2) * w, (float(p[2]) - float(p[4]) / 2) * h,
+                                          (float(p[1]) + float(p[3]) / 2) * w, (float(p[2]) + float(p[4]) / 2) * h))
+                       for p in lines if len(p) >= 5]
+                res = det.predict(str(img_path), imgsz=args.det_imgsz, conf=args.det_conf,
+                                  iou=0.7, max_det=300, device=args.device, verbose=False)[0]
+                for bx in res.boxes.xyxy.cpu().numpy():
+                    best_i, best_v = -1, 0.0
+                    for gi, (_, gb) in enumerate(gts):
+                        v = iou_one(bx, gb)
+                        if v > best_v:
+                            best_i, best_v = gi, v
+                    if best_v >= args.match_iou:
+                        items.append((gts[best_i][0], tuple(float(v) for v in bx)))
+                    else:
+                        skipped["unmatched"] += 1
+
+            for i, (cid, box) in enumerate(items):
                 if min(box[2] - box[0], box[3] - box[1]) < args.min_px:
                     skipped["small"] += 1
                     continue

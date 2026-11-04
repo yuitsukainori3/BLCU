@@ -94,6 +94,8 @@ def parse_args(argv=None):
     p.add_argument("--work-conf", type=float, default=0.25, help="统计用的工作点，与评测口径一致")
     p.add_argument("--iou", type=float, default=0.45, help="匹配 IoU")
     p.add_argument("--margin", type=float, default=0.2, help="分类器把握度阈值 |p-0.5|")
+    p.add_argument("--one-way", action="store_true",
+                   help="只允许 helmet→head 的改判（不把 head 改成 helmet），用于压低误合规")
     p.add_argument("--small", type=float, default=30.0, help="小于该宽度不送分类器")
     p.add_argument("--large", type=float, default=60.0, help="大于该宽度分类器优先")
     p.add_argument("--pad", type=float, default=1.3, help="裁片外扩倍数，与训练一致")
@@ -163,6 +165,8 @@ def main(argv=None) -> int:
                 by_route[r] += 1
                 if abs(p[1] - 0.5) > args.margin:
                     new = 1 if p[1] > 0.5 else 0
+                    if args.one_way and new == 1:
+                        continue          # 单向：不允许把 head 改成 helmet
                     if new != det_cls[i]:
                         if gts.size:
                             gi = int(np.argmax(iou_matrix(boxes[i][None, :], gts[:, 1:5])[0]))
