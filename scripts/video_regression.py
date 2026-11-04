@@ -29,7 +29,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
-from _ui import die, progress  # noqa: E402
+from _ui import die, progress, require_torch  # noqa: E402
 
 ROI_DEFAULT = ROOT / "configs" / "roi.json"
 
@@ -79,6 +79,7 @@ def main(argv=None) -> int:
     if min(args.conf) <= args.raw_conf:
         die(f"--conf 必须大于 --raw-conf（{args.raw_conf}）")
 
+    require_torch("回归跑分")
     import cv2
     from ultralytics import YOLO
 

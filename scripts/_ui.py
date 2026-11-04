@@ -86,6 +86,21 @@ def die(message: str) -> None:
     raise SystemExit(1)
 
 
+def require_torch(what: str = "这个脚本", hint: str = "") -> None:
+    """需要 GPU 环境（torch）。用错解释器时给一句人话，而不是甩 ModuleNotFoundError。
+
+    踩过的坑：拿一个空 venv 的 python 跑训练，报错指向 ultralytics 内部，看不出是环境问题。
+    """
+    import importlib.util
+
+    if importlib.util.find_spec("torch") is None:
+        message = (f"当前解释器没有 torch：{sys.executable}\n"
+                   f"  {what}要用装了 torch + ultralytics 的环境（本项目是 conda 环境 yolo），不是随便一个 venv。")
+        if hint:
+            message += f"\n  {hint}"
+        die(message)
+
+
 # --------------------------------------------------------------------------- #
 # 进度条
 # --------------------------------------------------------------------------- #

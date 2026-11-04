@@ -28,7 +28,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 VENDORED = ROOT / "ultralytics-8.3.163" / "ultralytics-8.3.163"
 sys.path.insert(0, str(ROOT / "scripts"))
-from _ui import Tee, die, echo_config  # noqa: E402
+from _ui import Tee, die, echo_config, require_torch  # noqa: E402
+
+EXAMPLE = (r"python scripts\train_detect.py --data datasets\shwd_neg\SHWD_neg.yaml "
+           r"--name neg_v1 --dry-run")
 
 # ==================== 可调参数（只改这里） ====================
 MODEL = "yolo11s.pt"      # 预训练权重；换模型只改这一行
@@ -78,7 +81,7 @@ def patch_threadpool():
 def parse_args(argv=None):
     """命令行默认值全部取自上面的「可调参数」，这里只做覆盖。"""
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--data", type=Path, required=True, help="数据集 yaml")
+    p.add_argument("--data", type=Path, default=None, help="数据集 yaml（必填）")
     p.add_argument("--model", default=MODEL, help=f"预训练权重（默认 {MODEL}）")
     p.add_argument("--epochs", type=int, default=EPOCHS)
     p.add_argument("--imgsz", type=int, default=IMGSZ)
@@ -86,7 +89,7 @@ def parse_args(argv=None):
     p.add_argument("--cache", default=CACHE, choices=("ram", "disk", "none"))
     p.add_argument("--workers", type=int, default=WORKERS)
     p.add_argument("--seed", type=int, default=SEED)
-    p.add_argument("--name", required=True, help="run 名，例如 neg_v1")
+    p.add_argument("--name", default=None, help="run 名，例如 neg_v1（必填）")
     p.add_argument("--project", type=Path, default=PROJECT)
     p.add_argument("--exist-ok", action="store_true", help="允许覆盖同名 run（默认不允许）")
     p.add_argument("--dry-run", action="store_true", help="只打印配置，不训练")
@@ -95,6 +98,13 @@ def parse_args(argv=None):
 
 def main(argv=None) -> int:
     args = parse_args(argv)
+    if args.data is None or args.name is None:
+        print("[错误] 缺参数：--data 和 --name 是必填的（它们决定这次用哪份数据、存到哪个 run）。",
+              file=sys.stderr)
+        print(f"  先看配置不训练：{EXAMPLE}", file=sys.stderr)
+        print(f"  确认后再真跑：  {EXAMPLE.replace(' --dry-run', '')}", file=sys.stderr)
+        return 2
+
     data = args.data.expanduser().resolve()
     if not data.is_file():
         die(f"data.yaml 不存在：{data}")
@@ -118,6 +128,7 @@ def main(argv=None) -> int:
         print("[dry-run] 配置没问题，没有启动训练。")
         return 0
 
+    require_torch("训练", hint="只想看配置不训练时加 --dry-run，那条路径不需要 torch。")
     sys.path.insert(0, str(VENDORED))
     patch_threadpool()
     from ultralytics import YOLO   # 导入很慢，放在 dry-run 之后

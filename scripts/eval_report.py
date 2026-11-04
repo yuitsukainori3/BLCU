@@ -36,7 +36,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
-from _ui import die, echo_config  # noqa: E402
+from _ui import die, echo_config, require_torch  # noqa: E402
 
 # ==================== 可调参数（只改这里） ====================
 DATA_YAML = (ROOT / "ultralytics-8.3.163" / "ultralytics-8.3.163"
@@ -137,6 +137,7 @@ def main(argv=None) -> int:
             ("产物", EVAL_DIR / f"{weights.parent.parent.name}_{args.split}"),
         ])
 
+    require_torch("评测")
     from ultralytics import YOLO
 
     # 先跑分层评测（独立子进程，自带一次推理），再在本进程做 val。

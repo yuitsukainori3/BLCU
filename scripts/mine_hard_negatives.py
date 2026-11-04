@@ -23,7 +23,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
-from _ui import die, echo_config, progress  # noqa: E402
+from _ui import die, echo_config, progress, require_torch  # noqa: E402
 
 # ==================== 可调参数（只改这里） ====================
 ROI_JSON = ROOT / "configs" / "roi.json"                  # 回归 ROI（只增不减）
@@ -65,6 +65,7 @@ def main(argv=None) -> int:
     if not args.roi.is_file():
         die(f"ROI 配置不存在：{args.roi}")
 
+    require_torch("难例挖掘")
     import cv2
     from ultralytics import YOLO
 

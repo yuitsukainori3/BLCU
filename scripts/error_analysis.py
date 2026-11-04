@@ -29,7 +29,7 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
-from _ui import die, echo_config, progress  # noqa: E402
+from _ui import die, echo_config, progress, require_torch  # noqa: E402
 
 # ==================== 可调参数（只改这里） ====================
 DATA_YAML = (ROOT / "ultralytics-8.3.163" / "ultralytics-8.3.163"
@@ -134,6 +134,7 @@ def main(argv=None) -> int:
         ("输出", args.out.expanduser().resolve()),
     ])
 
+    require_torch("错误分解")
     from PIL import Image
     from ultralytics import YOLO
 

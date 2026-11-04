@@ -40,7 +40,7 @@ from PIL import Image, ImageFilter
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
-from _ui import die, echo_config, progress  # noqa: E402
+from _ui import die, echo_config, progress, require_torch  # noqa: E402
 
 # ==================== 可调参数（只改这里） ====================
 DATA_YAML = (ROOT / "ultralytics-8.3.163" / "ultralytics-8.3.163"
@@ -175,6 +175,7 @@ def main(argv=None) -> int:
     if args.from_pred:
         if not args.det or not Path(args.det).expanduser().is_file():
             die("--from-pred 需要 --det 指向检测权重")
+        require_torch("--from-pred 裁片")
         from ultralytics import YOLO
         det = YOLO(str(Path(args.det).expanduser()))
 
