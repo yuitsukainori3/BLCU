@@ -28,12 +28,10 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+from _ui import die, progress  # noqa: E402
+
 ROI_DEFAULT = ROOT / "configs" / "roi.json"
-
-
-def die(msg: str):
-    print(f"[错误] {msg}", file=sys.stderr)
-    raise SystemExit(1)
 
 
 def load_roi(path: Path):
@@ -106,42 +104,47 @@ def main(argv=None) -> int:
         per_conf = {c: {"frames_hit": 0, "boxes_in_roi": 0, "heads": 0} for c in args.conf}
         n = 0
         elapsed = 0.0
-        while True:
-            ok, frame = cap.read()
-            if not ok:
-                break
-            if args.max_frames and n >= args.max_frames:
-                break
-            n += 1
-            t0 = time.perf_counter()
-            res = model.predict(frame, imgsz=args.imgsz, conf=args.raw_conf,
-                                device=args.device, verbose=False)[0]
-            elapsed += time.perf_counter() - t0
+        cap_total = total if not args.max_frames else min(total, args.max_frames) if total else args.max_frames
+        if not args.quiet:
+            print(f"[视频] {video.name}  {total} 帧  {fps:.0f} fps  {W}x{H}", flush=True)
+        bar = progress(total=cap_total, desc=video.stem[:22], unit="frame", disable=args.quiet)
+        with bar:
+            while True:
+                ok, frame = cap.read()
+                if not ok:
+                    break
+                if args.max_frames and n >= args.max_frames:
+                    break
+                n += 1
+                t0 = time.perf_counter()
+                res = model.predict(frame, imgsz=args.imgsz, conf=args.raw_conf,
+                                    device=args.device, verbose=False)[0]
+                elapsed += time.perf_counter() - t0
+                bar.update(1)
+                bar.set_postfix(ms=f"{elapsed / max(1, n) * 1000:.1f}")
 
-            heads = []
-            for b, c, cf in zip(res.boxes.xyxy.cpu().numpy(), res.boxes.cls.cpu().numpy().astype(int),
-                                res.boxes.conf.cpu().numpy()):
-                if int(c) != 0:
-                    continue
-                x1, y1, x2, y2 = (float(v) for v in b)
-                heads.append((float(cf), (x1 + x2) / 2, (y1 + y2) / 2, x2 - x1))
+                heads = []
+                for b, c, cf in zip(res.boxes.xyxy.cpu().numpy(), res.boxes.cls.cpu().numpy().astype(int),
+                                    res.boxes.conf.cpu().numpy()):
+                    if int(c) != 0:
+                        continue
+                    x1, y1, x2, y2 = (float(v) for v in b)
+                    heads.append((float(cf), (x1 + x2) / 2, (y1 + y2) / 2, x2 - x1))
 
-            for c in args.conf:
-                st = per_conf[c]
-                hit = False
-                for cf, cx, cy, bw in heads:
-                    if cf < c:
-                        continue
-                    st["heads"] += 1
-                    if bw > max_w:
-                        continue
-                    if any(r[1] <= cx <= r[3] and r[2] <= cy <= r[4] for r in rois):
-                        st["boxes_in_roi"] += 1
-                        hit = True
-                if hit:
-                    st["frames_hit"] += 1
-            if not args.quiet and n % 200 == 0:
-                print(f"  {video.name}: {n}/{total or '?'} 帧", file=sys.stderr)
+                for c in args.conf:
+                    st = per_conf[c]
+                    hit = False
+                    for cf, cx, cy, bw in heads:
+                        if cf < c:
+                            continue
+                        st["heads"] += 1
+                        if bw > max_w:
+                            continue
+                        if any(r[1] <= cx <= r[3] and r[2] <= cy <= r[4] for r in rois):
+                            st["boxes_in_roi"] += 1
+                            hit = True
+                    if hit:
+                        st["frames_hit"] += 1
         cap.release()
 
         ms = elapsed / max(1, n) * 1000
