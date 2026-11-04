@@ -4,14 +4,18 @@
 
 **训练必须由人明确指令触发**，本脚本自己不会跑。
 
-    # 先看清楚要跑什么（不占 GPU）
-    python scripts\\train_detect.py --data datasets\\shwd_neg\\SHWD_neg.yaml --name neg_v1 --dry-run
+    # 1) 先看清楚要跑什么（不占 GPU）
+    python scripts\\train_detect.py --dry-run
 
-    # 确认后再真跑
-    python scripts\\train_detect.py --data datasets\\shwd_neg\\SHWD_neg.yaml --name neg_v1
+    # 2) 确认后再真跑（用的是「可调参数」区的 DATA_YAML / RUN_NAME）
+    python scripts\\train_detect.py
 
-默认配置与 960 基线完全一致：yolo11s、960、50 轮、batch -1、cache ram、workers 0、seed 0，
-这样对比才只有一个变量（全部集中在下方的「可调参数」区，命令行可逐个覆盖）。
+    # 3) 临时换数据或换名字，不改文件
+    python scripts\\train_detect.py --data datasets\\shwd_neg\\SHWD_neg.yaml --name neg_v2
+
+用哪份数据、run 叫什么，都在下方「可调参数」区的前两行；命令行只是临时覆盖。
+超参与 960 基线完全一致：yolo11s、960、50 轮、batch -1、cache ram、workers 0、seed 0，
+这样对比才只有一个变量。
 
 进度条：训练中由 ultralytics 自带（与 `ultralytics-8.3.163\\Train.py` 同款两级 tqdm），
 本脚本不再包一层。日志：同时写屏和 `.tmp/<name>.log`；进度条走 stderr，不进日志。
@@ -30,10 +34,9 @@ VENDORED = ROOT / "ultralytics-8.3.163" / "ultralytics-8.3.163"
 sys.path.insert(0, str(ROOT / "scripts"))
 from _ui import Tee, die, echo_config, require_torch  # noqa: E402
 
-EXAMPLE = (r"python scripts\train_detect.py --data datasets\shwd_neg\SHWD_neg.yaml "
-           r"--name neg_v1 --dry-run")
-
 # ==================== 可调参数（只改这里） ====================
+DATA_YAML = ROOT / "datasets" / "shwd_neg" / "SHWD_neg.yaml"  # 这次训练用哪份数据
+RUN_NAME = "neg_v1"       # 这次 run 叫什么；结果写到 runs/detect/<这个名字>
 MODEL = "yolo11s.pt"      # 预训练权重；换模型只改这一行
 EPOCHS = 50               # 轮数；960 基线就是 50，为省时间砍了就没法比
 IMGSZ = 960               # 输入尺寸；基线 960，改了不可比
@@ -81,7 +84,7 @@ def patch_threadpool():
 def parse_args(argv=None):
     """命令行默认值全部取自上面的「可调参数」，这里只做覆盖。"""
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--data", type=Path, default=None, help="数据集 yaml（必填）")
+    p.add_argument("--data", type=Path, default=DATA_YAML, help=f"数据集 yaml（默认 {DATA_YAML.name}）")
     p.add_argument("--model", default=MODEL, help=f"预训练权重（默认 {MODEL}）")
     p.add_argument("--epochs", type=int, default=EPOCHS)
     p.add_argument("--imgsz", type=int, default=IMGSZ)
@@ -89,7 +92,7 @@ def parse_args(argv=None):
     p.add_argument("--cache", default=CACHE, choices=("ram", "disk", "none"))
     p.add_argument("--workers", type=int, default=WORKERS)
     p.add_argument("--seed", type=int, default=SEED)
-    p.add_argument("--name", default=None, help="run 名，例如 neg_v1（必填）")
+    p.add_argument("--name", default=RUN_NAME, help=f"run 名（默认 {RUN_NAME}）")
     p.add_argument("--project", type=Path, default=PROJECT)
     p.add_argument("--exist-ok", action="store_true", help="允许覆盖同名 run（默认不允许）")
     p.add_argument("--dry-run", action="store_true", help="只打印配置，不训练")
@@ -98,16 +101,9 @@ def parse_args(argv=None):
 
 def main(argv=None) -> int:
     args = parse_args(argv)
-    if args.data is None or args.name is None:
-        print("[错误] 缺参数：--data 和 --name 是必填的（它们决定这次用哪份数据、存到哪个 run）。",
-              file=sys.stderr)
-        print(f"  先看配置不训练：{EXAMPLE}", file=sys.stderr)
-        print(f"  确认后再真跑：  {EXAMPLE.replace(' --dry-run', '')}", file=sys.stderr)
-        return 2
-
     data = args.data.expanduser().resolve()
     if not data.is_file():
-        die(f"data.yaml 不存在：{data}")
+        die(f"data.yaml 不存在：{data}\n  改顶部 DATA_YAML，或用 --data 指定另一份")
     project = args.project.expanduser().resolve()
     run_dir = project / args.name
     cache = False if args.cache == "none" else args.cache
