@@ -42,6 +42,7 @@ LOW_CONF = 0.05        # 低置信探测的下限
 DEVICE = "0"
 OUT_DIR = ROOT / "runs" / "error_analysis"
 SAVE_CROPS = 0         # 为前 N 个 E 类样本保存裁剪图
+SAVE_FP = 24           # 存前 N 个 FP 裁片（按 conf 排序）并拼一张图，肉眼检查用；0 = 不存
 # ============================================================
 
 
@@ -57,6 +58,8 @@ def parse_args(argv=None):
     p.add_argument("--device", default=DEVICE)
     p.add_argument("--out", type=Path, default=OUT_DIR)
     p.add_argument("--save-crops", type=int, default=SAVE_CROPS, help="为前 N 个 E 类样本保存裁剪图")
+    p.add_argument("--save-fp", type=int, default=SAVE_FP,
+                   help="存前 N 个 FP 裁片并拼图（0 = 不存）")
     return p.parse_args(argv)
 
 
@@ -141,6 +144,7 @@ def main(argv=None) -> int:
     model = YOLO(str(weights))
 
     records = []
+    fp_records = []   # 误检：工作点以上、与任何 GT 的 IoU 都 < args.iou 的预测框
     bar = progress(img_files, desc=f"分解 {args.split}", unit="img")
     # 逐张推理：一次 predict 整批会把 282 张的中间结果都留在显存里，
     # 960 输入下 8 GB 卡必然 OOM（实测在 conv 前向就炸）。逐张跑最稳。
@@ -155,6 +159,26 @@ def main(argv=None) -> int:
         bright = float(gray.mean())
         contrast = float(gray.std())
         bar.set_postfix(gt=len(records) + len(gt))
+
+        # —— 误检（FP）：同一遍推理里顺手数掉，不额外花时间 ——
+        if len(pred):
+            keep = pred[:, 4] >= args.conf
+            if keep.any():
+                pp = pred[keep]
+                m = iou(pp[:, :4], gt[:, 1:5]).max(axis=1) if len(gt) else np.zeros(len(pp))
+                for box, cid, cf, mx in zip(pp[:, :4], pred_cls[keep], pp[:, 4], m):
+                    if mx >= args.iou:
+                        continue
+                    bw_, bh_ = float(box[2] - box[0]), float(box[3] - box[1])
+                    fp_records.append({
+                        "image": img_path.name, "cls": int(cid), "conf": round(float(cf), 3),
+                        "cx": round(float((box[0] + box[2]) / 2), 1),
+                        "cy": round(float((box[1] + box[3]) / 2), 1),
+                        "w_px": round(bw_, 1), "h_px": round(bh_, 1),
+                        "best_iou": round(float(mx), 3),
+                        "touch_edge": int(box[0] <= 2 or box[1] <= 2 or box[2] >= w - 2 or box[3] >= h - 2),
+                        "n_gt_image": len(gt),
+                    })
 
         for g in gt:
             gcls, gbox = int(g[0]), g[1:5]
@@ -240,9 +264,84 @@ def main(argv=None) -> int:
         lines.append(f"| {cname} | {s} | {m} | {l} |")
     lines.append("")
 
+    # ---- 误检（FP）----
+    if fp_records:
+        with (out / f"fp_{args.split}.csv").open("w", newline="", encoding="utf-8-sig") as f:
+            wr = csv.DictWriter(f, fieldnames=list(fp_records[0].keys()))
+            wr.writeheader()
+            wr.writerows(fp_records)
+
+        n_fp = len(fp_records)
+        by_cls = {c: sum(1 for r in fp_records if r["cls"] == c) for c in (head_id, helmet_id)}
+        buckets = [("<15", 0, 15), ("15—30", 15, 30), ("30—60", 30, 60), (">60", 60, 10 ** 9)]
+        size_heads = [r["w_px"] for r in fp_records if r["cls"] == head_id]
+        images_hit = len({r["image"] for r in fp_records})
+        lines += [f"## 误检（FP）：{n_fp} 个", "",
+                  f"口径：conf ≥ {args.conf} 且与任何 GT 的 IoU 都 < {args.iou} 的预测框，"
+                  f"分布在 {images_hit}/{len(img_files)} 张图里。", "",
+                  "| 预测类别 | 个数 | 中位宽×高(px) | 中位 conf | 贴边比例 |",
+                  "|---|---:|---|---:|---:|"]
+        for c, cname in ((head_id, "head"), (helmet_id, "helmet")):
+            sel = [r for r in fp_records if r["cls"] == c]
+            if not sel:
+                continue
+            w_ = float(np.median([r["w_px"] for r in sel]))
+            h_ = float(np.median([r["h_px"] for r in sel]))
+            cf_ = float(np.median([r["conf"] for r in sel]))
+            eg = float(np.mean([r["touch_edge"] for r in sel]))
+            lines.append(f"| {cname} | {len(sel)} | {w_:.0f}×{h_:.0f} | {cf_:.2f} | {eg:.0%} |")
+        lines += ["", "按预测框宽度分档（head 类）：", "",
+                  "| 尺寸 | " + " | ".join(b[0] for b in buckets) + " |",
+                  "|---|" + "---:|" * len(buckets)]
+        lines.append("| head | " + " | ".join(
+            str(sum(1 for wv in size_heads if lo <= wv < hi)) for _, lo, hi in buckets) + " |")
+        near = sum(1 for r in fp_records if 0.1 <= r["best_iou"] < args.iou)
+        far = sum(1 for r in fp_records if r["best_iou"] < 0.1)
+        lines += ["",
+                  f"- 与最近 GT 的 IoU ≥0.1（框不准/压在别的目标上）：**{near} 个**",
+                  f"- 与最近 GT 的 IoU <0.1（附近没有任何标注）：**{far} 个** ← 这类要么是标注缺失，要么是真误检",
+                  ""]
+
     report = "\n".join(lines)
     (out / f"summary_{args.split}.md").write_text(report + "\n", encoding="utf-8")
     print(report)
+
+    # ---- FP 裁片：直接看误检长什么样 ----
+    if args.save_fp > 0 and fp_records:
+        from PIL import ImageDraw
+
+        fp_dir = out / "fp_crops"
+        fp_dir.mkdir(parents=True, exist_ok=True)
+        picks = sorted(fp_records, key=lambda r: -r["conf"])[: args.save_fp]
+        tiles = []
+        for i, r in enumerate(picks):
+            im = Image.open(img_dir / r["image"]).convert("RGB")
+            W, H = im.size
+            bw, bh = float(r["w_px"]), float(r["h_px"])
+            pad = max(bw, bh) * 1.2
+            box = (max(0, r["cx"] - bw / 2 - pad), max(0, r["cy"] - bh / 2 - pad),
+                   min(W, r["cx"] + bw / 2 + pad), min(H, r["cy"] + bh / 2 + pad))
+            if box[2] - box[0] < 8 or box[3] - box[1] < 8:
+                continue
+            tile = im.crop(box).resize((160, 160), Image.BILINEAR)
+            cname = "head" if r["cls"] == head_id else "helmet"
+            tile.save(fp_dir / f"{i:02d}_{cname}_{r['conf']:.2f}_{Path(r['image']).stem}.jpg", quality=85)
+            draw = ImageDraw.Draw(tile)
+            color = (255, 60, 60) if r["cls"] == head_id else (60, 120, 255)
+            draw.rectangle([0, 0, 159, 159], outline=color, width=3)
+            draw.text((5, 5), f"{cname} {r['conf']:.2f} i={r['best_iou']:.2f}", fill=(255, 255, 0))
+            tiles.append(tile)
+
+        if tiles:
+            cols, cell = 8, 160
+            rows = (len(tiles) + cols - 1) // cols
+            sheet = Image.new("RGB", (cols * cell, rows * cell), "white")
+            for i, tile in enumerate(tiles):
+                sheet.paste(tile, ((i % cols) * cell, (i // cols) * cell))
+            sheet_path = out / f"fp_sheet_{args.split}.jpg"
+            sheet.save(sheet_path, quality=90)
+            print(f"\n[已保存] {len(tiles)} 张 FP 裁片 -> {fp_dir}")
+            print(f"[已保存] 拼图 -> {sheet_path}（红框=head / 蓝框=helmet，左上角是类别和 conf）")
 
     if args.save_crops > 0:
         crop_dir = out / "crops"
