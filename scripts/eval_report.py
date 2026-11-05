@@ -223,18 +223,21 @@ def main(argv=None) -> int:
         args.append.parent.mkdir(parents=True, exist_ok=True)
         if not args.append.exists():
             args.append.write_text("# 评测记录\n\n> 由 scripts/eval_report.py --append 自动追加。\n\n" + header,
-                                   encoding="utf-8")
-        # 插到「时间/权重」那张表的最后一行之后；文件末尾堆行会跑到正文外面去
-        text = args.append.read_text(encoding="utf-8").splitlines()
-        start = next((i for i, ln in enumerate(text) if ln.startswith("| 时间 |")), None)
+                                   encoding="utf-8", newline="\n")
+        # 插到「时间/权重」那张表的最后一行之后；文件末尾堆行会跑到正文外面去。
+        # 行尾按原文件来：Windows 上 open(..., "w") 默认把 \n 写成 \r\n，整份文件都会显示成"全改"。
+        raw = args.append.read_bytes().decode("utf-8")
+        sep = "\r\n" if "\r\n" in raw else "\n"
+        lines = raw.replace("\r\n", "\n").rstrip("\n").split("\n")
+        start = next((i for i, ln in enumerate(lines) if ln.startswith("| 时间 |")), None)
         if start is None:
-            text.append(row.rstrip("\n"))
+            lines.append(row.rstrip("\n"))
         else:
             end = start + 1
-            while end < len(text) and text[end].startswith("|"):
+            while end < len(lines) and lines[end].startswith("|"):
                 end += 1
-            text.insert(end, row.rstrip("\n"))
-        args.append.write_text("\n".join(text) + "\n", encoding="utf-8")
+            lines.insert(end, row.rstrip("\n"))
+        args.append.write_text(sep.join(lines) + sep, encoding="utf-8", newline="")
         print(f"[已追加] {args.append}")
     return 0
 
