@@ -221,11 +221,20 @@ def main(argv=None) -> int:
                f"{float(r.box.ap50[head_id]):.4f} | {float(r.box.ap50[helmet_id]):.4f} | "
                f"{'' if false_compliance is None else f'{false_compliance:.1%}'} |\n")
         args.append.parent.mkdir(parents=True, exist_ok=True)
-        new = not args.append.exists()
-        with args.append.open("a", encoding="utf-8") as f:
-            if new:
-                f.write("# 评测记录\n\n> 由 scripts/eval_report.py --append 自动追加。\n\n" + header)
-            f.write(row)
+        if not args.append.exists():
+            args.append.write_text("# 评测记录\n\n> 由 scripts/eval_report.py --append 自动追加。\n\n" + header,
+                                   encoding="utf-8")
+        # 插到「时间/权重」那张表的最后一行之后；文件末尾堆行会跑到正文外面去
+        text = args.append.read_text(encoding="utf-8").splitlines()
+        start = next((i for i, ln in enumerate(text) if ln.startswith("| 时间 |")), None)
+        if start is None:
+            text.append(row.rstrip("\n"))
+        else:
+            end = start + 1
+            while end < len(text) and text[end].startswith("|"):
+                end += 1
+            text.insert(end, row.rstrip("\n"))
+        args.append.write_text("\n".join(text) + "\n", encoding="utf-8")
         print(f"[已追加] {args.append}")
     return 0
 
